@@ -1,0 +1,250 @@
+name: Build Linux Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_deb:
+        description: 'Build DEB package'
+        type: boolean
+        default: true
+      build_rpm:
+        description: 'Build RPM package'
+        type: boolean
+        default: true
+      build_appimage:
+        description: 'Build AppImage'
+        type: boolean
+        default: true
+      build_flatpak:
+        description: 'Build Flatpak'
+        type: boolean
+        default: true
+      build_snap:
+        description: 'Build Snap'
+        type: boolean
+        default: true
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      # Build DEB package
+      - name: Build DEB package
+        if: ${{ inputs.build_deb }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --bundles deb
+
+      # Build RPM package
+      - name: Install RPM build dependencies
+        if: ${{ inputs.build_rpm }}
+        run: sudo apt-get install -y rpm
+
+      - name: Build RPM package
+        if: ${{ inputs.build_rpm }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --bundles rpm
+
+      # Build AppImage
+      - name: Build AppImage
+        if: ${{ inputs.build_appimage }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --bundles appimage
+
+      # Build Flatpak
+      - name: Install Flatpak dependencies
+        if: ${{ inputs.build_flatpak }}
+        run: |
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+
+      - name: Create Flatpak manifest
+        if: ${{ inputs.build_flatpak }}
+        run: |
+          mkdir -p flatpak-build
+          cat > flatpak-build/com.gosh.transfer.yml << 'EOF'
+          app-id: com.gosh.transfer
+          runtime: org.freedesktop.Platform
+          runtime-version: '23.08'
+          sdk: org.freedesktop.Sdk
+          command: gosh-transfer
+          finish-args:
+            - --share=ipc
+            - --socket=fallback-x11
+            - --socket=wayland
+            - --share=network
+            - --device=dri
+            - --filesystem=home
+          modules:
+            - name: gosh-transfer
+              buildsystem: simple
+              build-commands:
+                - install -Dm755 gosh-transfer /app/bin/gosh-transfer
+                - install -Dm644 gosh-transfer.desktop /app/share/applications/com.gosh.transfer.desktop
+                - install -Dm644 icon.png /app/share/icons/hicolor/128x128/apps/com.gosh.transfer.png
+              sources:
+                - type: file
+                  path: ../src-tauri/target/release/gosh-transfer
+                - type: file
+                  path: gosh-transfer.desktop
+                - type: file
+                  path: ../src-tauri/icons/128x128.png
+                  dest-filename: icon.png
+          EOF
+
+          cat > flatpak-build/gosh-transfer.desktop << 'EOF'
+          [Desktop Entry]
+          Name=Gosh Transfer
+          Comment=Simple, explicit file transfers
+          Exec=gosh-transfer
+          Icon=com.gosh.transfer
+          Terminal=false
+          Type=Application
+          Categories=Utility;Network;
+          EOF
+
+      - name: Build release binary for Flatpak
+        if: ${{ inputs.build_flatpak }}
+        run: |
+          cd src-tauri
+          cargo build --release
+
+      - name: Build Flatpak
+        if: ${{ inputs.build_flatpak }}
+        run: |
+          cd flatpak-build
+          flatpak-builder --force-clean --repo=repo build-dir com.gosh.transfer.yml
+          flatpak build-bundle repo gosh-transfer.flatpak com.gosh.transfer
+
+      # Build Snap
+      - name: Install Snapcraft
+        if: ${{ inputs.build_snap }}
+        run: |
+          sudo snap install snapcraft --classic
+
+      - name: Create Snap manifest
+        if: ${{ inputs.build_snap }}
+        run: |
+          mkdir -p snap
+          cat > snap/snapcraft.yaml << 'EOF'
+          name: gosh-transfer
+          base: core22
+          version: '0.1.0'
+          summary: Simple, explicit file transfers
+          description: |
+            Gosh Transfer is a clean, deterministic file transfer application.
+            No discovery magic, no cloud sync—just explicit IP/hostname transfers
+            that work reliably over LAN, Tailscale, and VPNs.
+          grade: stable
+          confinement: strict
+
+          apps:
+            gosh-transfer:
+              command: bin/gosh-transfer
+              extensions: [gnome]
+              plugs:
+                - home
+                - network
+                - network-bind
+
+          parts:
+            gosh-transfer:
+              plugin: dump
+              source: src-tauri/target/release/
+              source-type: local
+              organize:
+                gosh-transfer: bin/gosh-transfer
+              stage-packages:
+                - libwebkit2gtk-4.1-0
+                - libayatana-appindicator3-1
+          EOF
+
+      - name: Build release binary for Snap
+        if: ${{ inputs.build_snap }}
+        run: |
+          cd src-tauri
+          cargo build --release
+
+      - name: Build Snap
+        if: ${{ inputs.build_snap }}
+        run: |
+          snapcraft --destructive-mode
+
+      # Upload all artifacts
+      - name: Upload DEB artifact
+        if: ${{ inputs.build_deb }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: warn
+
+      - name: Upload RPM artifact
+        if: ${{ inputs.build_rpm }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-rpm
+          path: src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: warn
+
+      - name: Upload AppImage artifact
+        if: ${{ inputs.build_appimage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: warn
+
+      - name: Upload Flatpak artifact
+        if: ${{ inputs.build_flatpak }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak
+          path: flatpak-build/*.flatpak
+          if-no-files-found: warn
+
+      - name: Upload Snap artifact
+        if: ${{ inputs.build_snap }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-snap
+          path: "*.snap"
+          if-no-files-found: warn
