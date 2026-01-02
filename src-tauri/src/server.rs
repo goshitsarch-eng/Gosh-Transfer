@@ -6,9 +6,9 @@
 
 use axum::{
     body::Body,
-    extract::{Path, Query, State},
-    http::{header, StatusCode},
-    response::{IntoResponse, Response, Sse},
+    extract::{ConnectInfo, Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Sse},
     routing::{get, post},
     Json, Router,
 };
@@ -17,20 +17,23 @@ use tokio_stream::wrappers::BroadcastStream;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    io::ErrorKind,
     net::SocketAddr,
+    path::Path,
     path::PathBuf,
     sync::Arc,
 };
 use tokio::{
     fs::File,
+    fs::OpenOptions,
     io::AsyncWriteExt,
     sync::{broadcast, RwLock},
 };
 use uuid::Uuid;
 
 use crate::types::{
-    AppError, AppSettings, PendingTransfer, TransferFile, TransferProgress, TransferRequest,
-    TransferResponse,
+    AppError, AppSettings, PendingTransfer, TransferDecision, TransferProgress, TransferRequest,
+    TransferResponse, TransferStatus,
 };
 
 /// Server state shared across handlers
@@ -41,6 +44,8 @@ pub struct ServerState {
     pub pending_transfers: RwLock<HashMap<String, PendingTransfer>>,
     /// Approved transfer tokens (transfer_id -> token)
     pub approved_tokens: RwLock<HashMap<String, String>>,
+    /// Rejected transfers (transfer_id -> reason)
+    pub rejected_transfers: RwLock<HashMap<String, String>>,
     /// Channel to notify UI of events
     pub event_tx: broadcast::Sender<ServerEvent>,
     /// Download directory
@@ -70,6 +75,7 @@ impl ServerState {
             settings: RwLock::new(settings),
             pending_transfers: RwLock::new(HashMap::new()),
             approved_tokens: RwLock::new(HashMap::new()),
+            rejected_transfers: RwLock::new(HashMap::new()),
             event_tx,
             download_dir: RwLock::new(download_dir),
         }
@@ -84,6 +90,11 @@ pub struct ChunkParams {
     token: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TransferStatusParams {
+    transfer_id: String,
+}
+
 /// Create the Axum router for the file transfer server
 pub fn create_router(state: Arc<ServerState>) -> Router {
     Router::new()
@@ -93,11 +104,69 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/info", get(info_handler))
         // Transfer request - initiate a new transfer
         .route("/transfer", post(transfer_request_handler))
+        // Transfer approval status
+        .route("/transfer/status", get(transfer_status_handler))
         // Chunk upload - stream file data
         .route("/chunk", post(chunk_upload_handler))
         // SSE endpoint for transfer progress
         .route("/events", get(events_handler))
         .with_state(state)
+}
+
+fn sanitize_file_name(name: &str, fallback: &str) -> String {
+    let trimmed = name.trim();
+    let file_name = Path::new(trimmed)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty() && *n != "." && *n != "..");
+
+    file_name
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn split_file_name(name: &str) -> (&str, &str) {
+    if let Some((stem, ext)) = name.rsplit_once('.') {
+        if !stem.is_empty() {
+            return (stem, ext);
+        }
+    }
+    (name, "")
+}
+
+async fn open_unique_file(
+    download_dir: &Path,
+    base_name: &str,
+) -> Result<(PathBuf, File), std::io::Error> {
+    let (stem, ext) = split_file_name(base_name);
+
+    for index in 0..1000 {
+        let candidate = if index == 0 {
+            base_name.to_string()
+        } else if ext.is_empty() {
+            format!("{} ({})", stem, index)
+        } else {
+            format!("{} ({}).{}", stem, index, ext)
+        };
+
+        let path = download_dir.join(&candidate);
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+        {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+
+    Err(std::io::Error::new(
+        ErrorKind::AlreadyExists,
+        "Too many filename conflicts",
+    ))
 }
 
 /// Health check endpoint
@@ -123,27 +192,52 @@ async fn info_handler(State(state): State<Arc<ServerState>>) -> impl IntoRespons
 /// Handle incoming transfer request
 async fn transfer_request_handler(
     State(state): State<Arc<ServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(request): Json<TransferRequest>,
 ) -> impl IntoResponse {
+    let computed_total: u64 = request.files.iter().map(|f| f.size).sum();
+
+    if computed_total != request.total_size {
+        tracing::warn!(
+            "Transfer total mismatch for {}: client {}, computed {}",
+            request.transfer_id,
+            request.total_size,
+            computed_total
+        );
+    }
+
     tracing::info!(
         "Received transfer request: {} files, {} bytes",
         request.files.len(),
-        request.total_size
+        computed_total
     );
+
+    let source_ip = addr.ip().to_string();
 
     // Create a pending transfer record
     let pending = PendingTransfer {
         id: request.transfer_id.clone(),
-        source_ip: "unknown".to_string(), // Will be filled by middleware
+        source_ip: source_ip.clone(),
         sender_name: request.sender_name.clone(),
         files: request.files.clone(),
-        total_size: request.total_size,
+        total_size: computed_total,
         received_at: chrono::Utc::now(),
     };
 
     // Check if sender is in trusted hosts
     let settings = state.settings.read().await;
-    let is_trusted = false; // TODO: Check against trusted_hosts
+    let is_trusted = settings.trusted_hosts.iter().any(|host| host == &source_ip);
+
+    state
+        .pending_transfers
+        .write()
+        .await
+        .insert(request.transfer_id.clone(), pending.clone());
+    state
+        .rejected_transfers
+        .write()
+        .await
+        .remove(&request.transfer_id);
 
     if is_trusted {
         // Auto-accept from trusted hosts
@@ -154,19 +248,18 @@ async fn transfer_request_handler(
             .await
             .insert(request.transfer_id.clone(), token.clone());
 
+        state
+            .rejected_transfers
+            .write()
+            .await
+            .remove(&request.transfer_id);
+
         return Json(TransferResponse {
             accepted: true,
             message: Some("Auto-accepted from trusted host".to_string()),
             token: Some(token),
         });
     }
-
-    // Store pending transfer and notify UI
-    state
-        .pending_transfers
-        .write()
-        .await
-        .insert(request.transfer_id.clone(), pending.clone());
 
     // Notify UI about the incoming request
     let _ = state.event_tx.send(ServerEvent::TransferRequest {
@@ -178,6 +271,47 @@ async fn transfer_request_handler(
         accepted: false,
         message: Some("Awaiting user approval".to_string()),
         token: None,
+    })
+}
+
+/// Check transfer approval status
+async fn transfer_status_handler(
+    State(state): State<Arc<ServerState>>,
+    Query(params): Query<TransferStatusParams>,
+) -> impl IntoResponse {
+    let approved = state.approved_tokens.read().await;
+    if let Some(token) = approved.get(&params.transfer_id) {
+        return Json(TransferStatus {
+            status: TransferDecision::Accepted,
+            token: Some(token.clone()),
+            message: Some("Accepted".to_string()),
+        });
+    }
+    drop(approved);
+
+    let rejected = state.rejected_transfers.read().await;
+    if let Some(reason) = rejected.get(&params.transfer_id) {
+        return Json(TransferStatus {
+            status: TransferDecision::Rejected,
+            token: None,
+            message: Some(reason.clone()),
+        });
+    }
+    drop(rejected);
+
+    let pending = state.pending_transfers.read().await;
+    if pending.contains_key(&params.transfer_id) {
+        return Json(TransferStatus {
+            status: TransferDecision::Pending,
+            token: None,
+            message: Some("Awaiting user approval".to_string()),
+        });
+    }
+
+    Json(TransferStatus {
+        status: TransferDecision::NotFound,
+        token: None,
+        message: Some("Transfer not found".to_string()),
     })
 }
 
@@ -197,9 +331,17 @@ async fn chunk_upload_handler(
             Json(serde_json::json!({"error": "Invalid or expired token"})),
         );
     }
+    drop(approved);
 
     // Get download directory
     let download_dir = state.download_dir.read().await.clone();
+    if let Err(e) = tokio::fs::create_dir_all(&download_dir).await {
+        tracing::error!("Failed to create download directory: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to create download directory: {}", e)})),
+        );
+    }
 
     // Find the file info from pending transfers
     let pending = state.pending_transfers.read().await;
@@ -212,6 +354,7 @@ async fn chunk_upload_handler(
             );
         }
     };
+    drop(pending);
 
     let file_info = match transfer.files.iter().find(|f| f.id == params.file_id) {
         Some(f) => f.clone(),
@@ -223,10 +366,9 @@ async fn chunk_upload_handler(
         }
     };
 
-    // Create the output file
-    let file_path = download_dir.join(&file_info.name);
-    let mut file = match File::create(&file_path).await {
-        Ok(f) => f,
+    let safe_name = sanitize_file_name(&file_info.name, &file_info.id);
+    let (file_path, mut file) = match open_unique_file(&download_dir, &safe_name).await {
+        Ok(result) => result,
         Err(e) => {
             tracing::error!("Failed to create file: {}", e);
             return (
@@ -235,6 +377,11 @@ async fn chunk_upload_handler(
             );
         }
     };
+    let stored_name = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&safe_name)
+        .to_string();
 
     // Stream the body to the file
     let mut bytes_received: u64 = 0;
@@ -243,7 +390,19 @@ async fn chunk_upload_handler(
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(data) => {
-                bytes_received += data.len() as u64;
+                let next_size = bytes_received + data.len() as u64;
+                if next_size > file_info.size {
+                    tracing::error!(
+                        "Received more data than expected for {}",
+                        file_info.name
+                    );
+                    drop(file);
+                    let _ = tokio::fs::remove_file(&file_path).await;
+                    return (
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        Json(serde_json::json!({"error": "Received more data than expected"})),
+                    );
+                }
 
                 if let Err(e) = file.write_all(&data).await {
                     tracing::error!("Failed to write chunk: {}", e);
@@ -253,11 +412,13 @@ async fn chunk_upload_handler(
                     );
                 }
 
+                bytes_received = next_size;
+
                 // Send progress update
                 let _ = state.event_tx.send(ServerEvent::Progress {
                     progress: TransferProgress {
                         transfer_id: params.transfer_id.clone(),
-                        current_file: Some(file_info.name.clone()),
+                        current_file: Some(stored_name.clone()),
                         bytes_transferred: bytes_received,
                         total_bytes: file_info.size,
                         speed_bps: 0, // TODO: Calculate actual speed
@@ -279,9 +440,23 @@ async fn chunk_upload_handler(
         tracing::error!("Failed to flush file: {}", e);
     }
 
+    if bytes_received != file_info.size {
+        tracing::warn!(
+            "Size mismatch for {}: expected {}, received {}",
+            file_info.name,
+            file_info.size,
+            bytes_received
+        );
+        let _ = tokio::fs::remove_file(&file_path).await;
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Incomplete file received"})),
+        );
+    }
+
     tracing::info!(
         "File received: {} ({} bytes)",
-        file_info.name,
+        file_path.display(),
         bytes_received
     );
 
@@ -289,7 +464,7 @@ async fn chunk_upload_handler(
         StatusCode::OK,
         Json(serde_json::json!({
             "status": "ok",
-            "file": file_info.name,
+            "file": stored_name,
             "bytes_received": bytes_received
         })),
     )
@@ -328,7 +503,7 @@ pub async fn start_server(state: Arc<ServerState>, port: u16) -> Result<(), AppE
         .await
         .map_err(|e| AppError::Network(format!("Failed to bind to port {}: {}", port, e)))?;
 
-    axum::serve(listener, app)
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .map_err(|e| AppError::Network(format!("Server error: {}", e)))?;
 

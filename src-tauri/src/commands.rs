@@ -7,11 +7,11 @@
 use crate::{
     client::{get_network_interfaces, TransferClient},
     favorites::FavoritesStore,
-    server::{ServerEvent, ServerState},
+    server::ServerState,
     types::*,
 };
 use std::{path::PathBuf, sync::Arc};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 
 /// Application state managed by Tauri
@@ -119,7 +119,6 @@ pub async fn get_peer_info(
 #[tauri::command]
 pub async fn send_files(
     state: State<'_, AppState>,
-    app: AppHandle,
     address: String,
     port: u16,
     file_paths: Vec<String>,
@@ -127,6 +126,9 @@ pub async fn send_files(
     let paths: Vec<PathBuf> = file_paths.into_iter().map(PathBuf::from).collect();
 
     let settings = state.settings.read().await;
+    if settings.receive_only {
+        return Err("Sending is disabled in receive-only mode".to_string());
+    }
     let sender_name = Some(settings.device_name.clone());
     drop(settings);
 
@@ -154,6 +156,13 @@ pub async fn accept_transfer(
         .await
         .insert(transfer_id.clone(), token.clone());
 
+    state
+        .server_state
+        .rejected_transfers
+        .write()
+        .await
+        .remove(&transfer_id);
+
     Ok(token)
 }
 
@@ -170,6 +179,20 @@ pub async fn reject_transfer(
         .write()
         .await
         .remove(&transfer_id);
+
+    state
+        .server_state
+        .approved_tokens
+        .write()
+        .await
+        .remove(&transfer_id);
+
+    state
+        .server_state
+        .rejected_transfers
+        .write()
+        .await
+        .insert(transfer_id, "Rejected by user".to_string());
 
     Ok(())
 }
@@ -215,14 +238,22 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, Str
 #[tauri::command]
 pub async fn update_settings(
     state: State<'_, AppState>,
+    app: AppHandle,
     new_settings: AppSettings,
 ) -> Result<(), String> {
     let mut settings = state.settings.write().await;
     *settings = new_settings;
+    let updated_settings = settings.clone();
+    drop(settings);
 
     // Also update server state
     let mut server_settings = state.server_state.settings.write().await;
-    *server_settings = settings.clone();
+    *server_settings = updated_settings.clone();
+
+    let mut download_dir = state.server_state.download_dir.write().await;
+    *download_dir = updated_settings.download_dir.clone();
+
+    let _ = app.emit("settings-updated", updated_settings);
 
     Ok(())
 }
@@ -234,6 +265,12 @@ pub async fn add_trusted_host(state: State<'_, AppState>, host: String) -> Resul
     if !settings.trusted_hosts.contains(&host) {
         settings.trusted_hosts.push(host);
     }
+    drop(settings);
+
+    let mut server_settings = state.server_state.settings.write().await;
+    if !server_settings.trusted_hosts.contains(&host) {
+        server_settings.trusted_hosts.push(host);
+    }
     Ok(())
 }
 
@@ -242,6 +279,10 @@ pub async fn add_trusted_host(state: State<'_, AppState>, host: String) -> Resul
 pub async fn remove_trusted_host(state: State<'_, AppState>, host: String) -> Result<(), String> {
     let mut settings = state.settings.write().await;
     settings.trusted_hosts.retain(|h| h != &host);
+    drop(settings);
+
+    let mut server_settings = state.server_state.settings.write().await;
+    server_settings.trusted_hosts.retain(|h| h != &host);
     Ok(())
 }
 

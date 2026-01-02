@@ -22,6 +22,7 @@ Application settings including:
     deviceName: "",
     downloadDir: "",
     trustedHosts: [],
+    receiveOnly: false,
     notificationsEnabled: true,
   });
 
@@ -37,6 +38,7 @@ Application settings including:
         deviceName: loaded.deviceName,
         downloadDir: loaded.downloadDir,
         trustedHosts: loaded.trustedHosts || [],
+        receiveOnly: loaded.receiveOnly ?? false,
         notificationsEnabled: loaded.notificationsEnabled,
       };
     } catch (e) {
@@ -56,6 +58,7 @@ Application settings including:
           deviceName: settings.deviceName,
           downloadDir: settings.downloadDir,
           trustedHosts: settings.trustedHosts,
+          receiveOnly: settings.receiveOnly,
           notificationsEnabled: settings.notificationsEnabled,
         },
       });
@@ -100,6 +103,10 @@ Application settings including:
   // Toggle notifications
   function toggleNotifications() {
     settings.notificationsEnabled = !settings.notificationsEnabled;
+  }
+
+  function toggleReceiveOnly() {
+    settings.receiveOnly = !settings.receiveOnly;
   }
 </script>
 
@@ -166,6 +173,31 @@ Application settings including:
       {:else}
         <p class="text-muted">No interfaces detected</p>
       {/if}
+    </div>
+  </div>
+</div>
+
+<!-- Transfer Mode -->
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Transfer Mode</h3>
+    <p class="card-subtitle">Control outgoing transfers</p>
+  </div>
+  <div class="card-body">
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Receive-only Mode</div>
+        <div class="setting-description">
+          Disable sending and hide the Send tab
+        </div>
+      </div>
+      <button
+        class="toggle"
+        class:active={settings.receiveOnly}
+        onclick={toggleReceiveOnly}
+      >
+        <span class="toggle-knob"></span>
+      </button>
     </div>
   </div>
 </div>

@@ -95,6 +95,28 @@ pub struct TransferResponse {
     pub token: Option<String>,
 }
 
+/// Transfer approval status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TransferDecision {
+    Pending,
+    Accepted,
+    Rejected,
+    NotFound,
+}
+
+/// Status response for a transfer awaiting approval
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferStatus {
+    /// Current approval status
+    pub status: TransferDecision,
+    /// Token for subsequent chunk uploads (if accepted)
+    pub token: Option<String>,
+    /// Optional message
+    pub message: Option<String>,
+}
+
 /// A completed or failed transfer record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -193,6 +215,8 @@ pub struct AppSettings {
     pub download_dir: PathBuf,
     /// Auto-accept from trusted hosts
     pub trusted_hosts: Vec<String>,
+    /// Receive-only mode (disable sending)
+    pub receive_only: bool,
     /// Show system notifications
     pub notifications_enabled: bool,
 }
@@ -210,6 +234,7 @@ impl Default for AppSettings {
                 .unwrap_or_else(|_| "Gosh Device".to_string()),
             download_dir,
             trusted_hosts: Vec::new(),
+            receive_only: false,
             notifications_enabled: true,
         }
     }

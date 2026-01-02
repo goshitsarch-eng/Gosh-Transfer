@@ -5,20 +5,21 @@
 // This ensures reliable connections over LAN, Tailscale, and VPNs.
 
 use crate::types::{
-    AppError, ResolveResult, TransferFile, TransferProgress, TransferRequest, TransferResponse,
+    AppError, ResolveResult, TransferDecision, TransferFile, TransferProgress, TransferRequest,
+    TransferResponse, TransferStatus,
 };
-use reqwest::Client;
+use reqwest::{Body, Client};
 use std::{
-    net::{SocketAddr, ToSocketAddrs},
+    net::ToSocketAddrs,
     path::Path,
-    sync::Arc,
     time::Duration,
 };
 use tokio::{
     fs::File,
-    io::AsyncReadExt,
     sync::broadcast,
+    time::{sleep, Instant},
 };
+use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 /// Client for sending files to a peer
@@ -148,14 +149,14 @@ impl TransferClient {
         &self,
         address: &str,
         port: u16,
+        transfer_id: &str,
         files: Vec<TransferFile>,
         sender_name: Option<String>,
     ) -> Result<TransferResponse, AppError> {
-        let transfer_id = Uuid::new_v4().to_string();
         let total_size: u64 = files.iter().map(|f| f.size).sum();
 
         let request = TransferRequest {
-            transfer_id: transfer_id.clone(),
+            transfer_id: transfer_id.to_string(),
             sender_name,
             files,
             total_size,
@@ -188,6 +189,58 @@ impl TransferClient {
         Ok(transfer_response)
     }
 
+    async fn wait_for_approval(
+        &self,
+        address: &str,
+        port: u16,
+        transfer_id: &str,
+    ) -> Result<TransferStatus, AppError> {
+        let url = format!(
+            "http://{}:{}/transfer/status?transfer_id={}",
+            address, port, transfer_id
+        );
+        let timeout = Duration::from_secs(120);
+        let poll_interval = Duration::from_millis(500);
+        let started = Instant::now();
+
+        loop {
+            let response = self
+                .http_client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| AppError::Network(format!("Failed to check transfer status: {}", e)))?;
+
+            if !response.status().is_success() {
+                return Err(AppError::Network(format!(
+                    "Status check failed: {}",
+                    response.status()
+                )));
+            }
+
+            let status: TransferStatus = response
+                .json()
+                .await
+                .map_err(|e| AppError::Serialization(format!("Failed to parse status: {}", e)))?;
+
+            match status.status {
+                TransferDecision::Pending => {
+                    if started.elapsed() > timeout {
+                        return Err(AppError::Network(
+                            "Transfer approval timed out".to_string(),
+                        ));
+                    }
+                    sleep(poll_interval).await;
+                }
+                TransferDecision::Accepted => return Ok(status),
+                TransferDecision::Rejected => return Err(AppError::TransferRejected),
+                TransferDecision::NotFound => {
+                    return Err(AppError::Network("Transfer not found".to_string()))
+                }
+            }
+        }
+    }
+
     /// Send a file to a peer (after transfer is accepted)
     pub async fn send_file(
         &self,
@@ -214,11 +267,7 @@ impl TransferClient {
             .map_err(|e| AppError::FileIo(format!("Failed to get file metadata: {}", e)))?;
 
         let file_size = metadata.len();
-        let mut buffer = Vec::with_capacity(file_size as usize);
-
-        file.read_to_end(&mut buffer)
-            .await
-            .map_err(|e| AppError::FileIo(format!("Failed to read file: {}", e)))?;
+        let stream = ReaderStream::new(file);
 
         // Send the file
         let response = self
@@ -226,7 +275,7 @@ impl TransferClient {
             .post(&url)
             .header("Content-Type", "application/octet-stream")
             .header("Content-Length", file_size)
-            .body(buffer)
+            .body(Body::wrap_stream(stream))
             .send()
             .await
             .map_err(|e| AppError::Network(format!("Failed to send file: {}", e)))?;
@@ -259,6 +308,8 @@ impl TransferClient {
         file_paths: Vec<std::path::PathBuf>,
         sender_name: Option<String>,
     ) -> Result<(), AppError> {
+        let transfer_id = Uuid::new_v4().to_string();
+
         // Build file list with metadata
         let mut files = Vec::new();
         for path in &file_paths {
@@ -286,20 +337,23 @@ impl TransferClient {
 
         // Request transfer
         let response = self
-            .request_transfer(address, port, files.clone(), sender_name)
+            .request_transfer(address, port, &transfer_id, files.clone(), sender_name)
             .await?;
 
-        if !response.accepted {
-            return Err(AppError::TransferRejected);
-        }
-
-        let token = response
-            .token
-            .ok_or_else(|| AppError::Network("No token received".to_string()))?;
+        let token = if response.accepted {
+            response
+                .token
+                .ok_or_else(|| AppError::Network("No token received".to_string()))?
+        } else {
+            let status = self
+                .wait_for_approval(address, port, &transfer_id)
+                .await?;
+            status
+                .token
+                .ok_or_else(|| AppError::Network("No token received".to_string()))?
+        };
 
         // Send each file
-        let transfer_id = Uuid::new_v4().to_string(); // This should come from the request
-
         for (file, path) in files.iter().zip(file_paths.iter()) {
             self.send_file(address, port, &transfer_id, &token, &file.id, path)
                 .await?;

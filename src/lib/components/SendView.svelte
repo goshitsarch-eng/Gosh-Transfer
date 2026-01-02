@@ -13,6 +13,7 @@ Includes:
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
 
   // Destination state
   let destination = $state("");
@@ -30,6 +31,8 @@ Includes:
   // File selection state
   let selectedFiles = $state([]);
   let isDragging = $state(false);
+  let fileAddError = $state("");
+  let hasTauriDrop = $state(false);
 
   // Transfer state
   let isSending = $state(false);
@@ -45,6 +48,35 @@ Includes:
       favorites = await invoke("list_favorites");
     } catch (e) {
       console.error("Failed to load favorites:", e);
+    }
+
+    try {
+      const unlisten = await getCurrentWindow().onDragDropEvent((event) => {
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          isDragging = true;
+          return;
+        }
+
+        if (event.payload.type === "leave") {
+          isDragging = false;
+          return;
+        }
+
+        if (event.payload.type === "drop") {
+          isDragging = false;
+          if (event.payload.paths?.length) {
+            addFilePaths(event.payload.paths);
+          }
+        }
+      });
+
+      hasTauriDrop = true;
+
+      return () => {
+        unlisten();
+      };
+    } catch (e) {
+      console.error("Failed to register drag-drop handler:", e);
     }
   });
 
@@ -141,34 +173,57 @@ Includes:
 
       if (selected) {
         const paths = Array.isArray(selected) ? selected : [selected];
-        // Create file objects from paths
-        for (const path of paths) {
-          selectedFiles = [
-            ...selectedFiles,
-            {
-              path: path,
-              name: path.split(/[/\\]/).pop(),
-              size: 0, // Size will be determined by backend
-            },
-          ];
-        }
+        addFilePaths(paths);
       }
     } catch (e) {
       console.error("Failed to open file picker:", e);
     }
   }
 
-  // Add files from drop
-  function addFiles(files) {
-    for (const file of files) {
+  function addFilePaths(paths) {
+    fileAddError = "";
+    for (const path of paths) {
+      if (!path || selectedFiles.some((file) => file.path === path)) {
+        continue;
+      }
+
       selectedFiles = [
         ...selectedFiles,
         {
-          path: file.path || file.name,
+          path,
+          name: path.split(/[/\\]/).pop(),
+          size: 0, // Size will be determined by backend
+        },
+      ];
+    }
+  }
+
+  // Add files from drop
+  function addFiles(files) {
+    fileAddError = "";
+    let missingPath = false;
+    for (const file of files) {
+      if (!file.path) {
+        missingPath = true;
+        continue;
+      }
+
+      if (selectedFiles.some((selected) => selected.path === file.path)) {
+        continue;
+      }
+
+      selectedFiles = [
+        ...selectedFiles,
+        {
+          path: file.path,
           name: file.name,
           size: file.size,
         },
       ];
+    }
+
+    if (missingPath && !hasTauriDrop) {
+      fileAddError = "Drag-and-drop paths are unavailable here. Use Browse instead.";
     }
   }
 
@@ -369,6 +424,9 @@ Includes:
       <p class="drop-zone-text">Drop files here or click to browse</p>
       <p class="drop-zone-hint">Supports any file type</p>
     </div>
+    {#if fileAddError}
+      <div class="form-error mt-2">{fileAddError}</div>
+    {/if}
 
     <!-- Selected files list -->
     {#if selectedFiles.length > 0}

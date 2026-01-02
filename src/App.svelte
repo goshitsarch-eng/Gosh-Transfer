@@ -18,6 +18,7 @@ NOTICE: This project is NOT affiliated with Motrix.
 
   // Navigation state
   let currentView = $state("send");
+  let receiveOnly = $state(false);
 
   // Server status
   let serverStatus = $state({
@@ -46,6 +47,16 @@ NOTICE: This project is NOT affiliated with Motrix.
       console.error("Failed to get server status:", e);
     }
 
+    try {
+      const settings = await invoke("get_settings");
+      receiveOnly = settings.receiveOnly ?? false;
+      if (receiveOnly) {
+        currentView = "receive";
+      }
+    } catch (e) {
+      console.error("Failed to get settings:", e);
+    }
+
     // Listen for incoming transfer requests
     const unlistenRequest = await listen("transfer-request", (event) => {
       pendingTransfers = [...pendingTransfers, event.payload.transfer];
@@ -59,16 +70,31 @@ NOTICE: This project is NOT affiliated with Motrix.
       );
     });
 
+    const unlistenSettings = await listen("settings-updated", (event) => {
+      receiveOnly = event.payload.receiveOnly ?? false;
+      if (receiveOnly && currentView === "send") {
+        currentView = "receive";
+      }
+    });
+
     return () => {
       unlistenRequest();
       unlistenComplete();
+      unlistenSettings();
     };
   });
 
   // Navigate to a view
   function navigate(viewId) {
+    if (receiveOnly && viewId === "send") return;
     currentView = viewId;
   }
+
+  $effect(() => {
+    if (receiveOnly && currentView === "send") {
+      currentView = "receive";
+    }
+  });
 
   // Get icon SVG
   function getIcon(name) {
@@ -106,7 +132,7 @@ NOTICE: This project is NOT affiliated with Motrix.
 
     <!-- Navigation -->
     <nav class="sidebar-nav">
-      {#each navItems as item}
+    {#each (receiveOnly ? navItems.filter((item) => item.id !== "send") : navItems) as item}
         <button
           class="nav-item"
           class:active={currentView === item.id}
