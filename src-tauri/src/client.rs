@@ -5,8 +5,8 @@
 // This ensures reliable connections over LAN, Tailscale, and VPNs.
 
 use crate::types::{
-    AppError, ResolveResult, TransferDecision, TransferFile, TransferProgress, TransferRequest,
-    TransferResponse, TransferStatus,
+    AppError, ResolveResult, TransferApprovalStatus, TransferDecision, TransferFile,
+    TransferProgress, TransferRequest, TransferResponse,
 };
 use reqwest::{Body, Client};
 use std::{
@@ -194,7 +194,7 @@ impl TransferClient {
         address: &str,
         port: u16,
         transfer_id: &str,
-    ) -> Result<TransferStatus, AppError> {
+    ) -> Result<TransferApprovalStatus, AppError> {
         let url = format!(
             "http://{}:{}/transfer/status?transfer_id={}",
             address, port, transfer_id
@@ -218,7 +218,7 @@ impl TransferClient {
                 )));
             }
 
-            let status: TransferStatus = response
+            let status: TransferApprovalStatus = response
                 .json()
                 .await
                 .map_err(|e| AppError::Serialization(format!("Failed to parse status: {}", e)))?;
@@ -257,7 +257,7 @@ impl TransferClient {
         );
 
         // Open and read the file
-        let mut file = File::open(file_path)
+        let file = File::open(file_path)
             .await
             .map_err(|e| AppError::FileIo(format!("Failed to open file: {}", e)))?;
 

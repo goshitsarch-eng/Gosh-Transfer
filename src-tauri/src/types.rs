@@ -108,7 +108,7 @@ pub enum TransferDecision {
 /// Status response for a transfer awaiting approval
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TransferStatus {
+pub struct TransferApprovalStatus {
     /// Current approval status
     pub status: TransferDecision,
     /// Token for subsequent chunk uploads (if accepted)

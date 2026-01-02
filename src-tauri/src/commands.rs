@@ -263,7 +263,7 @@ pub async fn update_settings(
 pub async fn add_trusted_host(state: State<'_, AppState>, host: String) -> Result<(), String> {
     let mut settings = state.settings.write().await;
     if !settings.trusted_hosts.contains(&host) {
-        settings.trusted_hosts.push(host);
+        settings.trusted_hosts.push(host.clone());
     }
     drop(settings);
 

@@ -13,7 +13,7 @@ Includes:
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
 
   // Destination state
   let destination = $state("");
@@ -51,7 +51,7 @@ Includes:
     }
 
     try {
-      const unlisten = await getCurrentWindow().onDragDropEvent((event) => {
+      const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
         if (event.payload.type === "enter" || event.payload.type === "over") {
           isDragging = true;
           return;
@@ -177,6 +177,7 @@ Includes:
       }
     } catch (e) {
       console.error("Failed to open file picker:", e);
+      fileAddError = `Failed to open file picker: ${e.toString()}`;
     }
   }
 

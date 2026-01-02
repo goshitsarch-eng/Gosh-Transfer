@@ -32,8 +32,8 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::types::{
-    AppError, AppSettings, PendingTransfer, TransferDecision, TransferProgress, TransferRequest,
-    TransferResponse, TransferStatus,
+    AppError, AppSettings, PendingTransfer, TransferApprovalStatus, TransferDecision,
+    TransferProgress, TransferRequest, TransferResponse,
 };
 
 /// Server state shared across handlers
@@ -281,7 +281,7 @@ async fn transfer_status_handler(
 ) -> impl IntoResponse {
     let approved = state.approved_tokens.read().await;
     if let Some(token) = approved.get(&params.transfer_id) {
-        return Json(TransferStatus {
+        return Json(TransferApprovalStatus {
             status: TransferDecision::Accepted,
             token: Some(token.clone()),
             message: Some("Accepted".to_string()),
@@ -291,7 +291,7 @@ async fn transfer_status_handler(
 
     let rejected = state.rejected_transfers.read().await;
     if let Some(reason) = rejected.get(&params.transfer_id) {
-        return Json(TransferStatus {
+        return Json(TransferApprovalStatus {
             status: TransferDecision::Rejected,
             token: None,
             message: Some(reason.clone()),
@@ -301,14 +301,14 @@ async fn transfer_status_handler(
 
     let pending = state.pending_transfers.read().await;
     if pending.contains_key(&params.transfer_id) {
-        return Json(TransferStatus {
+        return Json(TransferApprovalStatus {
             status: TransferDecision::Pending,
             token: None,
             message: Some("Awaiting user approval".to_string()),
         });
     }
 
-    Json(TransferStatus {
+    Json(TransferApprovalStatus {
         status: TransferDecision::NotFound,
         token: None,
         message: Some("Transfer not found".to_string()),
