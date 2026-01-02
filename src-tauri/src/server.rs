@@ -13,6 +13,7 @@ use axum::{
     Json, Router,
 };
 use futures_util::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -301,10 +302,10 @@ async fn events_handler(
 {
     let rx = state.event_tx.subscribe();
 
-    let stream = tokio_stream::wrappers::BroadcastStream::new(rx).map(|result| {
-        let event = match result {
+    let stream = BroadcastStream::new(rx).map(|result: Result<ServerEvent, _>| {
+        let event: ServerEvent = match result {
             Ok(event) => event,
-            Err(_) => return Ok(axum::response::sse::Event::default().data("heartbeat")),
+            Err(_) => return Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default().data("heartbeat")),
         };
 
         let data = serde_json::to_string(&event).unwrap_or_default();

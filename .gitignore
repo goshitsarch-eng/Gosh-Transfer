@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+src-tauri/target/
+
+# Vite cache
+.vite/
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Claude Code session
+.claude/
+
+# Rust
+**/*.rs.bk
+
+# Tauri
+src-tauri/WixTools/
+src-tauri/gen/
+src-tauri/icons/icon.iconset/

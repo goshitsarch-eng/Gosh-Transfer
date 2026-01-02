@@ -323,10 +323,12 @@ pub fn get_network_interfaces() -> Vec<crate::types::NetworkInterface> {
 
     if let Ok(addrs) = get_if_addrs::get_if_addrs() {
         for iface in addrs {
+            let is_loopback = iface.is_loopback();
+            let ip = iface.ip().to_string();
             interfaces.push(crate::types::NetworkInterface {
                 name: iface.name,
-                ip: iface.ip().to_string(),
-                is_loopback: iface.is_loopback(),
+                ip,
+                is_loopback,
             });
         }
     }

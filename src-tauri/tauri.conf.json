@@ -51,7 +51,10 @@
       }
     },
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "frameworks": [],
+      "exceptionDomain": null,
+      "signingIdentity": null
     },
     "windows": {
       "wix": null,

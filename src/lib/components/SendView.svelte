@@ -291,7 +291,7 @@ Includes:
           <div class="favorite-actions">
             <button
               class="btn btn-ghost btn-sm"
-              onclick|stopPropagation={() => deleteFavorite(fav.id)}
+              onclick={(e) => { e.stopPropagation(); deleteFavorite(fav.id); }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>

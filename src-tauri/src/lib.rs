@@ -12,6 +12,7 @@ pub mod types;
 
 use commands::AppState;
 use favorites::FavoritesStore;
+use tauri::{Emitter, Manager};
 use server::ServerState;
 use std::sync::Arc;
 use types::AppSettings;
