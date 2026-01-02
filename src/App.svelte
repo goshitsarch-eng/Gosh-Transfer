@@ -66,7 +66,7 @@ NOTICE: This project is NOT affiliated with Motrix.
     const unlistenComplete = await listen("transfer-complete", (event) => {
       // Remove from pending
       pendingTransfers = pendingTransfers.filter(
-        (t) => t.id !== event.payload.transfer_id
+        (t) => t.id !== event.payload.transferId
       );
     });
 
@@ -88,6 +88,24 @@ NOTICE: This project is NOT affiliated with Motrix.
   function navigate(viewId) {
     if (receiveOnly && viewId === "send") return;
     currentView = viewId;
+  }
+
+  async function acceptPendingTransfer(transferId) {
+    try {
+      await invoke("accept_transfer", { transferId });
+      pendingTransfers = pendingTransfers.filter((t) => t.id !== transferId);
+    } catch (e) {
+      console.error("Failed to accept transfer:", e);
+    }
+  }
+
+  async function rejectPendingTransfer(transferId) {
+    try {
+      await invoke("reject_transfer", { transferId });
+      pendingTransfers = pendingTransfers.filter((t) => t.id !== transferId);
+    } catch (e) {
+      console.error("Failed to reject transfer:", e);
+    }
   }
 
   $effect(() => {
@@ -166,7 +184,11 @@ NOTICE: This project is NOT affiliated with Motrix.
     {#if currentView === "send"}
       <SendView />
     {:else if currentView === "receive"}
-      <ReceiveView {pendingTransfers} />
+      <ReceiveView
+        {pendingTransfers}
+        onAccept={acceptPendingTransfer}
+        onReject={rejectPendingTransfer}
+      />
     {:else if currentView === "transfers"}
       <TransfersView />
     {:else if currentView === "settings"}

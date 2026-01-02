@@ -12,7 +12,7 @@ Includes:
   import { invoke } from "@tauri-apps/api/core";
 
   // Props
-  let { pendingTransfers = [] } = $props();
+  let { pendingTransfers = [], onAccept = () => {}, onReject = () => {} } = $props();
 
   // Server info
   let serverInfo = $state({
@@ -30,24 +30,6 @@ Includes:
       console.error("Failed to get server status:", e);
     }
   });
-
-  // Accept a transfer
-  async function acceptTransfer(transferId) {
-    try {
-      await invoke("accept_transfer", { transferId });
-    } catch (e) {
-      console.error("Failed to accept transfer:", e);
-    }
-  }
-
-  // Reject a transfer
-  async function rejectTransfer(transferId) {
-    try {
-      await invoke("reject_transfer", { transferId });
-    } catch (e) {
-      console.error("Failed to reject transfer:", e);
-    }
-  }
 
   // Format file size
   function formatSize(bytes) {
@@ -155,7 +137,7 @@ Includes:
           <div class="transfer-actions">
             <button
               class="btn btn-primary"
-              onclick={() => acceptTransfer(transfer.id)}
+              onclick={() => onAccept(transfer.id)}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
@@ -164,7 +146,7 @@ Includes:
             </button>
             <button
               class="btn btn-destructive"
-              onclick={() => rejectTransfer(transfer.id)}
+              onclick={() => onReject(transfer.id)}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
