@@ -154,11 +154,6 @@ jobs:
           flatpak build-bundle repo gosh-transfer.flatpak com.gosh.transfer
 
       # Build Snap
-      - name: Install Snapcraft
-        if: ${{ inputs.build_snap }}
-        run: |
-          sudo snap install snapcraft --classic
-
       - name: Create Snap manifest
         if: ${{ inputs.build_snap }}
         run: |
@@ -203,8 +198,8 @@ jobs:
 
       - name: Build Snap
         if: ${{ inputs.build_snap }}
-        run: |
-          snapcraft --destructive-mode
+        uses: snapcore/action-build@v1
+        id: snapcraft
 
       # Upload all artifacts
       - name: Upload DEB artifact
@@ -244,5 +239,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-snap
-          path: "*.snap"
+          path: ${{ steps.snapcraft.outputs.snap }}
           if-no-files-found: warn
