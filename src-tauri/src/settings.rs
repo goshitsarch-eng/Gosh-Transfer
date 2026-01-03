@@ -19,8 +19,10 @@ impl SettingsStore {
     /// Create a new settings store, loading from disk if available
     pub fn new() -> Result<Self, AppError> {
         let file_path = Self::get_settings_path()?;
+        tracing::info!("Settings file path: {:?}", file_path);
 
         let settings = if file_path.exists() {
+            tracing::info!("Loading settings from disk");
             let content = fs::read_to_string(&file_path)
                 .map_err(|e| AppError::FileIo(format!("Failed to read settings: {}", e)))?;
 
@@ -29,13 +31,22 @@ impl SettingsStore {
                 AppSettings::default()
             })
         } else {
+            tracing::info!("No settings file found, using defaults");
             AppSettings::default()
         };
 
-        Ok(Self {
+        let store = Self {
             settings: RwLock::new(settings),
             file_path,
-        })
+        };
+
+        // Persist default settings if file doesn't exist
+        if !store.file_path.exists() {
+            tracing::info!("Creating initial settings file");
+            store.persist()?;
+        }
+
+        Ok(store)
     }
 
     /// Get the path to the settings file
@@ -72,12 +83,19 @@ impl SettingsStore {
 
     /// Update settings and persist to disk
     pub fn update(&self, new_settings: AppSettings) -> Result<(), AppError> {
+        tracing::info!("Updating settings, theme: {}", new_settings.theme);
         {
             let mut settings = self.settings.write().unwrap();
             *settings = new_settings;
         }
 
-        self.persist()
+        let result = self.persist();
+        if result.is_ok() {
+            tracing::info!("Settings persisted successfully");
+        } else {
+            tracing::error!("Failed to persist settings: {:?}", result);
+        }
+        result
     }
 }
 
