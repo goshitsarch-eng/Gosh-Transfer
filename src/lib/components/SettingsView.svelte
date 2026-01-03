@@ -14,7 +14,7 @@ Application settings including:
   import { open } from "@tauri-apps/plugin-dialog";
 
   // Props
-  let { serverStatus = {} } = $props();
+  let { serverStatus = {}, onThemeChange = () => {} } = $props();
 
   // Settings state
   let settings = $state({
@@ -24,6 +24,7 @@ Application settings including:
     trustedHosts: [],
     receiveOnly: false,
     notificationsEnabled: true,
+    theme: "system",
   });
 
   let isSaving = $state(false);
@@ -40,6 +41,7 @@ Application settings including:
         trustedHosts: loaded.trustedHosts || [],
         receiveOnly: loaded.receiveOnly ?? false,
         notificationsEnabled: loaded.notificationsEnabled,
+        theme: loaded.theme ?? "system",
       };
     } catch (e) {
       console.error("Failed to load settings:", e);
@@ -60,6 +62,7 @@ Application settings including:
           trustedHosts: settings.trustedHosts,
           receiveOnly: settings.receiveOnly,
           notificationsEnabled: settings.notificationsEnabled,
+          theme: settings.theme,
         },
       });
       saveMessage = "Settings saved";
@@ -108,6 +111,12 @@ Application settings including:
   function toggleReceiveOnly() {
     settings.receiveOnly = !settings.receiveOnly;
   }
+
+  // Set theme with immediate preview
+  function setTheme(theme) {
+    settings.theme = theme;
+    onThemeChange(theme);
+  }
 </script>
 
 <div class="view-header">
@@ -132,6 +141,44 @@ Application settings including:
         placeholder="My Computer"
       />
       <p class="form-hint">This name is shown to other devices during transfers</p>
+    </div>
+  </div>
+</div>
+
+<!-- Appearance Settings -->
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Appearance</h3>
+    <p class="card-subtitle">Choose your preferred color theme</p>
+  </div>
+  <div class="card-body">
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Theme</div>
+        <div class="setting-description">
+          Select dark, light, or follow your system preference
+        </div>
+      </div>
+      <div class="theme-toggle">
+        <button
+          class:active={settings.theme === "dark"}
+          onclick={() => setTheme("dark")}
+        >
+          Dark
+        </button>
+        <button
+          class:active={settings.theme === "light"}
+          onclick={() => setTheme("light")}
+        >
+          Light
+        </button>
+        <button
+          class:active={settings.theme === "system"}
+          onclick={() => setTheme("system")}
+        >
+          System
+        </button>
+      </div>
     </div>
   </div>
 </div>

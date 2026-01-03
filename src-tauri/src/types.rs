@@ -219,6 +219,13 @@ pub struct AppSettings {
     pub receive_only: bool,
     /// Show system notifications
     pub notifications_enabled: bool,
+    /// Theme preference: "dark", "light", or "system"
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+fn default_theme() -> String {
+    "system".to_string()
 }
 
 impl Default for AppSettings {
@@ -236,6 +243,7 @@ impl Default for AppSettings {
             trusted_hosts: Vec::new(),
             receive_only: false,
             notifications_enabled: true,
+            theme: default_theme(),
         }
     }
 }

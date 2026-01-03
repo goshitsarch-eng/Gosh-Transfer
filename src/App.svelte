@@ -9,12 +9,16 @@ NOTICE: This project is NOT affiliated with Motrix.
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { initTheme, applyTheme } from "./lib/theme.js";
 
   // View components
   import SendView from "./lib/components/SendView.svelte";
   import ReceiveView from "./lib/components/ReceiveView.svelte";
   import TransfersView from "./lib/components/TransfersView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
+
+  // Theme controller (set after initialization)
+  let themeController = null;
 
   // Navigation state
   let currentView = $state("send");
@@ -57,8 +61,12 @@ NOTICE: This project is NOT affiliated with Motrix.
       if (receiveOnly) {
         currentView = "receive";
       }
+      // Initialize theme
+      themeController = initTheme(settings.theme ?? "system");
     } catch (e) {
       console.error("Failed to get settings:", e);
+      // Default to system theme if settings fail to load
+      themeController = initTheme("system");
     }
 
     // Listen for incoming transfer requests
@@ -107,6 +115,10 @@ NOTICE: This project is NOT affiliated with Motrix.
       if (receiveOnly && currentView === "send") {
         currentView = "receive";
       }
+      // Update theme if changed
+      if (event.payload.theme && themeController) {
+        themeController.setTheme(event.payload.theme);
+      }
     });
 
     return () => {
@@ -115,8 +127,20 @@ NOTICE: This project is NOT affiliated with Motrix.
       unlistenComplete();
       unlistenFailed();
       unlistenSettings();
+      if (themeController) {
+        themeController.cleanup();
+      }
     };
   });
+
+  // Handler for immediate theme changes from SettingsView
+  function handleThemeChange(theme) {
+    if (themeController) {
+      themeController.setTheme(theme);
+    } else {
+      applyTheme(theme);
+    }
+  }
 
   // Navigate to a view
   function navigate(viewId) {
@@ -242,7 +266,7 @@ NOTICE: This project is NOT affiliated with Motrix.
     {:else if currentView === "transfers"}
       <TransfersView />
     {:else if currentView === "settings"}
-      <SettingsView {serverStatus} />
+      <SettingsView {serverStatus} onThemeChange={handleThemeChange} />
     {/if}
   </main>
 </div>

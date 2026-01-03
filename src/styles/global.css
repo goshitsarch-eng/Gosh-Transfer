@@ -86,6 +86,48 @@
   --sidebar-width: 220px;
 }
 
+/* Light theme overrides */
+:root[data-theme="light"] {
+  /* Background colors - clean white/gray */
+  --bg-base: #ffffff;
+  --bg-surface: #f6f8fa;
+  --bg-elevated: #ffffff;
+  --bg-hover: #ebedf0;
+  --bg-active: #d8dee4;
+
+  /* Border colors - subtle gray */
+  --border-default: #d0d7de;
+  --border-muted: #d8dee4;
+  --border-subtle: #ebedf0;
+
+  /* Text colors - dark for readability */
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-muted: #8b949e;
+  --text-placeholder: #8b949e;
+
+  /* Primary action - Green (adjusted for light bg) */
+  --primary: #1a7f37;
+  --primary-hover: #2da44e;
+  --primary-active: #1a7f37;
+  --primary-text: #1a7f37;
+
+  /* Destructive - Red (adjusted for light bg) */
+  --destructive: #cf222e;
+  --destructive-hover: #a40e26;
+  --destructive-text: #cf222e;
+
+  /* Status colors (adjusted for light bg contrast) */
+  --status-success: #1a7f37;
+  --status-warning: #9a6700;
+  --status-error: #cf222e;
+  --status-info: #0969da;
+
+  /* Accent - blue for links and highlights */
+  --accent: #0969da;
+  --accent-muted: #218bff;
+}
+
 /* ============================================================================
    RESET AND BASE STYLES
    ============================================================================ */
@@ -865,6 +907,38 @@ body {
 
 .toggle.active .toggle-knob {
   transform: translateX(20px);
+}
+
+/* Theme toggle - segmented control */
+.theme-toggle {
+  display: inline-flex;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  padding: 2px;
+  gap: 2px;
+}
+
+.theme-toggle button {
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-sans);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.theme-toggle button:hover:not(.active) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.theme-toggle button.active {
+  background: var(--primary);
+  color: white;
 }
 
 /* ============================================================================
