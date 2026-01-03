@@ -1,0 +1,112 @@
+name: Build Flatpak
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-flatpak:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            flatpak \
+            flatpak-builder
+
+      - name: Setup Flatpak
+        run: |
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build release binary
+        run: cargo build --release
+        working-directory: src-tauri
+
+      - name: Prepare Flatpak build
+        run: |
+          mkdir -p flatpak-build
+
+          cat > flatpak-build/com.gosh.transfer.yml << 'EOF'
+          app-id: com.gosh.transfer
+          runtime: org.freedesktop.Platform
+          runtime-version: '24.08'
+          sdk: org.freedesktop.Sdk
+          command: gosh-transfer
+          finish-args:
+            - --share=ipc
+            - --socket=fallback-x11
+            - --socket=wayland
+            - --share=network
+            - --device=dri
+            - --filesystem=home
+          modules:
+            - name: gosh-transfer
+              buildsystem: simple
+              build-commands:
+                - install -Dm755 gosh-transfer /app/bin/gosh-transfer
+                - install -Dm644 com.gosh.transfer.desktop /app/share/applications/com.gosh.transfer.desktop
+                - install -Dm644 icon-128.png /app/share/icons/hicolor/128x128/apps/com.gosh.transfer.png
+                - install -Dm644 icon-256.png /app/share/icons/hicolor/256x256/apps/com.gosh.transfer.png
+              sources:
+                - type: file
+                  path: gosh-transfer
+                - type: file
+                  path: com.gosh.transfer.desktop
+                - type: file
+                  path: icon-128.png
+                - type: file
+                  path: icon-256.png
+          EOF
+
+          cat > flatpak-build/com.gosh.transfer.desktop << 'EOF'
+          [Desktop Entry]
+          Name=Gosh Transfer
+          Comment=Simple, explicit file transfers over LAN, Tailscale, and VPNs
+          Exec=gosh-transfer
+          Icon=com.gosh.transfer
+          Terminal=false
+          Type=Application
+          Categories=Utility;Network;FileTransfer;
+          Keywords=transfer;file;send;receive;network;
+          EOF
+
+          cp src-tauri/target/release/gosh-transfer flatpak-build/
+          cp src-tauri/icons/128x128.png flatpak-build/icon-128.png
+          cp src-tauri/icons/128x128@2x.png flatpak-build/icon-256.png
+
+      - name: Build Flatpak
+        run: |
+          cd flatpak-build
+          flatpak-builder --force-clean --repo=repo build-dir com.gosh.transfer.yml
+          flatpak build-bundle repo gosh-transfer.flatpak com.gosh.transfer
+
+      - name: Upload Flatpak artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak
+          path: flatpak-build/gosh-transfer.flatpak
+          if-no-files-found: error
