@@ -39,7 +39,9 @@ impl TransferClient {
         let (progress_tx, _) = broadcast::channel(100);
 
         let http_client = Client::builder()
-            .timeout(Duration::from_secs(30))
+            // No global timeout - large file transfers can take a long time
+            // Use read_timeout to detect stalled connections instead
+            .read_timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(10))
             .build()
             .expect("Failed to create HTTP client");
