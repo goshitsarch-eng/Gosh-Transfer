@@ -2,9 +2,24 @@
 
 A cross-platform desktop application for explicit file transfers over LAN, Tailscale, and VPNs.
 
+## Philosophy
+
+Gosh apps are built with a Linux-first mindset: simplicity, transparency, and user control.
+
+We also provide Windows and macOS builds not as a compromise, but as an on-ramp. Many people are curious about Linux but still live on other platforms day-to-day. If these tools help someone get comfortable and eventually make the jump, we're happy to meet them where they are.
+
 ## What It Does
 
 Gosh Transfer sends files between computers using explicit IP addresses or hostnames. No auto-discovery, no cloud services, no magic—you specify where files go.
+
+## Screenshots
+
+![Screenshot 1](screenshots/img1.png)
+![Screenshot 2](screenshots/img2.png)
+![Screenshot 3](screenshots/img3.png)
+![Screenshot 4](screenshots/img4.png)
+![Screenshot 5](screenshots/img5.png)
+
 
 ## Features
 
@@ -105,6 +120,13 @@ Outputs: AppImage, .deb, .rpm (Linux), .exe/.msi (Windows), .dmg (macOS)
 5. **Trusted hosts use exact IP match** - Hostnames in trusted hosts won't work without prior resolution
 6. **Transfer history volatile** - Lost on application close
 
+## Disclaimer
+
+This application is an independent project and is not sponsored by, endorsed by, or affiliated with Localsend or GitHub, Inc.
+
+This software is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). It is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability or fitness for a particular purpose. Use at your own risk.
+
 ## License
 
-AGPL-3.0
+AGPL-3.0 - See [LICENSE](LICENSE)
+
