@@ -122,6 +122,18 @@ pub fn run() {
                 }
             });
 
+            // Set up event forwarding from client (sending) to frontend
+            let app_handle2 = app.handle().clone();
+            let mut client_rx = app.state::<AppState>().client.subscribe_progress();
+
+            tauri::async_runtime::spawn(async move {
+                while let Ok(progress) = client_rx.recv().await {
+                    if let Err(e) = app_handle2.emit("send-progress", &progress) {
+                        tracing::warn!("Failed to emit send progress: {}", e);
+                    }
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

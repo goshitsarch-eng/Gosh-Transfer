@@ -31,6 +31,10 @@ NOTICE: This project is NOT affiliated with Motrix.
   // Pending transfer notifications
   let pendingTransfers = $state([]);
 
+  // Active transfers (in progress) and recent results
+  let activeTransfers = $state([]);
+  let recentResults = $state([]);
+
   // Navigation items
   const navItems = [
     { id: "send", label: "Send", icon: "upload" },
@@ -62,12 +66,40 @@ NOTICE: This project is NOT affiliated with Motrix.
       pendingTransfers = [...pendingTransfers, event.payload.transfer];
     });
 
+    // Listen for progress updates (receiving)
+    const unlistenProgress = await listen("transfer-progress", (event) => {
+      const progress = event.payload.progress;
+      const existing = activeTransfers.find(t => t.id === progress.transferId);
+      if (existing) {
+        activeTransfers = activeTransfers.map(t =>
+          t.id === progress.transferId ? { ...t, ...progress } : t
+        );
+      }
+    });
+
     // Listen for transfer completions
     const unlistenComplete = await listen("transfer-complete", (event) => {
-      // Remove from pending
-      pendingTransfers = pendingTransfers.filter(
-        (t) => t.id !== event.payload.transferId
-      );
+      const { transferId } = event.payload;
+      const completed = activeTransfers.find(t => t.id === transferId);
+      activeTransfers = activeTransfers.filter(t => t.id !== transferId);
+      pendingTransfers = pendingTransfers.filter(t => t.id !== transferId);
+      if (completed) {
+        recentResults = [...recentResults, { ...completed, status: 'completed' }];
+        setTimeout(() => {
+          recentResults = recentResults.filter(r => r.id !== transferId);
+        }, 5000);
+      }
+    });
+
+    // Listen for transfer failures
+    const unlistenFailed = await listen("transfer-failed", (event) => {
+      const { transferId, error } = event.payload;
+      activeTransfers = activeTransfers.filter(t => t.id !== transferId);
+      pendingTransfers = pendingTransfers.filter(t => t.id !== transferId);
+      recentResults = [...recentResults, { id: transferId, status: 'failed', error }];
+      setTimeout(() => {
+        recentResults = recentResults.filter(r => r.id !== transferId);
+      }, 8000);
     });
 
     const unlistenSettings = await listen("settings-updated", (event) => {
@@ -79,7 +111,9 @@ NOTICE: This project is NOT affiliated with Motrix.
 
     return () => {
       unlistenRequest();
+      unlistenProgress();
       unlistenComplete();
+      unlistenFailed();
       unlistenSettings();
     };
   });
@@ -93,10 +127,23 @@ NOTICE: This project is NOT affiliated with Motrix.
   async function acceptPendingTransfer(transferId) {
     try {
       await invoke("accept_transfer", { transferId });
+      // Move to active transfers (will get progress updates)
+      const transfer = pendingTransfers.find(t => t.id === transferId);
+      if (transfer) {
+        activeTransfers = [...activeTransfers, {
+          ...transfer,
+          bytesTransferred: 0,
+          totalBytes: transfer.totalSize
+        }];
+      }
       pendingTransfers = pendingTransfers.filter((t) => t.id !== transferId);
     } catch (e) {
       console.error("Failed to accept transfer:", e);
     }
+  }
+
+  function dismissResult(resultId) {
+    recentResults = recentResults.filter(r => r.id !== resultId);
   }
 
   async function rejectPendingTransfer(transferId) {
@@ -186,8 +233,11 @@ NOTICE: This project is NOT affiliated with Motrix.
     {:else if currentView === "receive"}
       <ReceiveView
         {pendingTransfers}
+        {activeTransfers}
+        {recentResults}
         onAccept={acceptPendingTransfer}
         onReject={rejectPendingTransfer}
+        onDismissResult={dismissResult}
       />
     {:else if currentView === "transfers"}
       <TransfersView />

@@ -12,6 +12,7 @@ Includes:
 <script>
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
 
@@ -38,6 +39,7 @@ Includes:
   let isSending = $state(false);
   let sendError = $state("");
   let sendSuccess = $state(false);
+  let sendProgress = $state(null); // { status, bytesTransferred, totalBytes, currentFile }
 
   // Default port
   const DEFAULT_PORT = 53317;
@@ -50,8 +52,20 @@ Includes:
       console.error("Failed to load favorites:", e);
     }
 
+    // Listen for send progress updates
+    const unlistenProgress = await listen("send-progress", (event) => {
+      if (isSending) {
+        sendProgress = {
+          ...sendProgress,
+          ...event.payload,
+          status: 'sending'
+        };
+      }
+    });
+
+    let unlistenDrop = null;
     try {
-      const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+      unlistenDrop = await getCurrentWebview().onDragDropEvent((event) => {
         if (event.payload.type === "enter" || event.payload.type === "over") {
           isDragging = true;
           return;
@@ -71,13 +85,14 @@ Includes:
       });
 
       hasTauriDrop = true;
-
-      return () => {
-        unlisten();
-      };
     } catch (e) {
       console.error("Failed to register drag-drop handler:", e);
     }
+
+    return () => {
+      unlistenProgress();
+      if (unlistenDrop) unlistenDrop();
+    };
   });
 
   // Resolve hostname when destination changes
@@ -249,6 +264,15 @@ Includes:
     sendError = "";
     sendSuccess = false;
 
+    // Initialize progress
+    const totalBytes = selectedFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+    sendProgress = {
+      status: 'waiting',
+      bytesTransferred: 0,
+      totalBytes: totalBytes,
+      currentFile: null
+    };
+
     try {
       const ip = resolveResult.ips[0];
       const filePaths = selectedFiles.map((f) => f.path);
@@ -268,6 +292,7 @@ Includes:
       sendError = e.toString();
     } finally {
       isSending = false;
+      sendProgress = null;
     }
   }
 
@@ -462,6 +487,33 @@ Includes:
     {#if sendSuccess}
       <div class="form-success mb-4">Files sent successfully!</div>
     {/if}
+
+    {#if isSending && sendProgress}
+      <div class="send-progress mb-4">
+        <div class="progress-header">
+          <span class="progress-status">
+            {#if sendProgress.status === 'waiting'}
+              Waiting for approval...
+            {:else}
+              Sending{sendProgress.currentFile ? `: ${sendProgress.currentFile}` : '...'}
+            {/if}
+          </span>
+          {#if sendProgress.totalBytes > 0}
+            <span class="progress-size">
+              {formatSize(sendProgress.bytesTransferred || 0)} / {formatSize(sendProgress.totalBytes)}
+            </span>
+          {/if}
+        </div>
+        <div class="progress-bar">
+          <div
+            class="progress-fill"
+            class:indeterminate={sendProgress.status === 'waiting'}
+            style="width: {sendProgress.totalBytes > 0 ? ((sendProgress.bytesTransferred || 0) / sendProgress.totalBytes) * 100 : 0}%"
+          ></div>
+        </div>
+      </div>
+    {/if}
+
     <button
       class="btn btn-primary btn-lg"
       disabled={!canSend()}
@@ -469,7 +521,11 @@ Includes:
       style="width: 100%;"
     >
       {#if isSending}
-        Sending...
+        {#if sendProgress?.status === 'waiting'}
+          Waiting for approval...
+        {:else}
+          Sending...
+        {/if}
       {:else}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
@@ -485,5 +541,55 @@ Includes:
     margin-top: var(--space-4);
     padding-top: var(--space-4);
     border-top: 1px solid var(--border-muted);
+  }
+
+  .send-progress {
+    padding: var(--space-3);
+    background: var(--bg-elevated);
+    border-radius: var(--radius-md);
+  }
+
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-2);
+  }
+
+  .progress-status {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .progress-size {
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+  }
+
+  .progress-bar {
+    height: 8px;
+    background: var(--bg-base);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--primary);
+    transition: width 0.2s ease;
+  }
+
+  .progress-fill.indeterminate {
+    width: 30% !important;
+    animation: indeterminate 1.5s ease-in-out infinite;
+  }
+
+  @keyframes indeterminate {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(400%);
+    }
   }
 </style>

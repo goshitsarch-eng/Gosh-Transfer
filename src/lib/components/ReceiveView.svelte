@@ -12,7 +12,14 @@ Includes:
   import { invoke } from "@tauri-apps/api/core";
 
   // Props
-  let { pendingTransfers = [], onAccept = () => {}, onReject = () => {} } = $props();
+  let {
+    pendingTransfers = [],
+    activeTransfers = [],
+    recentResults = [],
+    onAccept = () => {},
+    onReject = () => {},
+    onDismissResult = () => {}
+  } = $props();
 
   // Server info
   let serverInfo = $state({
@@ -89,6 +96,64 @@ Includes:
   </div>
 </div>
 
+<!-- Recent Results (success/failure notifications) -->
+{#if recentResults.length > 0}
+  {#each recentResults as result}
+    <div class="card result-card" class:success={result.status === 'completed'} class:error={result.status === 'failed'}>
+      <div class="card-body">
+        <div class="result-content">
+          {#if result.status === 'completed'}
+            <svg class="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <div class="result-text">
+              <span class="result-title">Transfer complete</span>
+              <span class="result-details">
+                {result.files?.length || 0} file{(result.files?.length || 0) !== 1 ? 's' : ''} ({formatSize(result.totalBytes || result.totalSize || 0)}) received
+              </span>
+            </div>
+          {:else}
+            <svg class="result-icon error" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <div class="result-text">
+              <span class="result-title">Transfer failed</span>
+              <span class="result-details">{result.error}</span>
+            </div>
+          {/if}
+          <button class="dismiss-btn" onclick={() => onDismissResult(result.id)}>×</button>
+        </div>
+      </div>
+    </div>
+  {/each}
+{/if}
+
+<!-- Active Transfers (in progress) -->
+{#if activeTransfers.length > 0}
+  <div class="active-section">
+    <h3 class="section-title">Receiving</h3>
+    {#each activeTransfers as transfer}
+      <div class="card active-transfer-card">
+        <div class="card-body">
+          <div class="active-transfer-header">
+            <span class="transfer-label">Receiving files...</span>
+            <span class="transfer-size-info">{formatSize(transfer.bytesTransferred || 0)} / {formatSize(transfer.totalBytes || transfer.totalSize || 0)}</span>
+          </div>
+          {#if transfer.currentFile}
+            <div class="current-file">{transfer.currentFile}</div>
+          {/if}
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {((transfer.bytesTransferred || 0) / (transfer.totalBytes || transfer.totalSize || 1)) * 100}%"></div>
+          </div>
+          {#if transfer.speedBps}
+            <div class="transfer-speed">{formatSize(transfer.speedBps)}/s</div>
+          {/if}
+        </div>
+      </div>
+    {/each}
+  </div>
+{/if}
+
 <!-- Pending Transfers -->
 {#if pendingTransfers.length > 0}
   <div class="pending-section">
@@ -158,8 +223,10 @@ Includes:
       </div>
     {/each}
   </div>
-{:else}
-  <!-- Empty state -->
+{/if}
+
+<!-- Empty state (only show when no pending, active, or recent) -->
+{#if pendingTransfers.length === 0 && activeTransfers.length === 0 && recentResults.length === 0}
   <div class="card">
     <div class="card-body">
       <div class="empty-state">
@@ -331,5 +398,122 @@ Includes:
   .transfer-actions {
     display: flex;
     gap: var(--space-3);
+  }
+
+  /* Active Transfers */
+  .active-section {
+    margin-top: var(--space-4);
+  }
+
+  .active-transfer-card {
+    border-color: var(--accent);
+  }
+
+  .active-transfer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .transfer-label {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .transfer-size-info {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+  }
+
+  .current-file {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    margin: var(--space-2) 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .progress-bar {
+    height: 8px;
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    margin-top: var(--space-2);
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--primary);
+    transition: width 0.2s ease;
+  }
+
+  .transfer-speed {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    margin-top: var(--space-2);
+  }
+
+  /* Result Cards */
+  .result-card {
+    margin-top: var(--space-3);
+  }
+
+  .result-card.success {
+    border-color: var(--status-success);
+    background: rgba(35, 134, 54, 0.1);
+  }
+
+  .result-card.error {
+    border-color: var(--status-error);
+    background: rgba(248, 81, 73, 0.1);
+  }
+
+  .result-content {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .result-icon {
+    flex-shrink: 0;
+  }
+
+  .result-icon.success {
+    color: var(--status-success);
+  }
+
+  .result-icon.error {
+    color: var(--status-error);
+  }
+
+  .result-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .result-title {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .result-details {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+  }
+
+  .dismiss-btn {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: var(--space-1);
+  }
+
+  .dismiss-btn:hover {
+    color: var(--text-primary);
   }
 </style>
