@@ -8,10 +8,15 @@ use crate::types::{
     AppError, ResolveResult, TransferApprovalStatus, TransferDecision, TransferFile,
     TransferProgress, TransferRequest, TransferResponse,
 };
+use futures::StreamExt;
 use reqwest::{Body, Client};
 use std::{
     net::ToSocketAddrs,
     path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 use tokio::{
@@ -250,6 +255,8 @@ impl TransferClient {
         token: &str,
         file_id: &str,
         file_path: &Path,
+        total_transfer_size: u64,
+        bytes_sent_so_far: Arc<AtomicU64>,
     ) -> Result<(), AppError> {
         let url = format!(
             "http://{}:{}/chunk?transfer_id={}&file_id={}&token={}",
@@ -267,7 +274,40 @@ impl TransferClient {
             .map_err(|e| AppError::FileIo(format!("Failed to get file metadata: {}", e)))?;
 
         let file_size = metadata.len();
-        let stream = ReaderStream::new(file);
+
+        // Create progress-tracking stream
+        let progress_tx = self.progress_tx.clone();
+        let transfer_id_owned = transfer_id.to_string();
+        let file_name = file_path.file_name().unwrap().to_string_lossy().to_string();
+        let last_update = Arc::new(AtomicU64::new(0));
+
+        let stream = ReaderStream::new(file).inspect({
+            let progress_tx = progress_tx.clone();
+            let transfer_id = transfer_id_owned.clone();
+            let file_name = file_name.clone();
+            let bytes_sent = bytes_sent_so_far.clone();
+            let last_update = last_update.clone();
+
+            move |chunk_result| {
+                if let Ok(chunk) = chunk_result {
+                    let new_total = bytes_sent.fetch_add(chunk.len() as u64, Ordering::SeqCst)
+                        + chunk.len() as u64;
+                    let last = last_update.load(Ordering::SeqCst);
+
+                    // Throttle updates to every 32KB to avoid flooding
+                    if new_total - last >= 32768 || new_total == total_transfer_size {
+                        last_update.store(new_total, Ordering::SeqCst);
+                        let _ = progress_tx.send(TransferProgress {
+                            transfer_id: transfer_id.clone(),
+                            current_file: Some(file_name.clone()),
+                            bytes_transferred: new_total,
+                            total_bytes: total_transfer_size,
+                            speed_bps: 0,
+                        });
+                    }
+                }
+            }
+        });
 
         // Send the file
         let response = self
@@ -288,12 +328,13 @@ impl TransferClient {
             )));
         }
 
-        // Send progress update
+        // Send final progress update for this file
+        let final_bytes = bytes_sent_so_far.load(Ordering::SeqCst);
         let _ = self.progress_tx.send(TransferProgress {
-            transfer_id: transfer_id.to_string(),
-            current_file: Some(file_path.file_name().unwrap().to_string_lossy().to_string()),
-            bytes_transferred: file_size,
-            total_bytes: file_size,
+            transfer_id: transfer_id_owned,
+            current_file: Some(file_name),
+            bytes_transferred: final_bytes,
+            total_bytes: total_transfer_size,
             speed_bps: 0,
         });
 
@@ -353,10 +394,23 @@ impl TransferClient {
                 .ok_or_else(|| AppError::Network("No token received".to_string()))?
         };
 
+        // Calculate total transfer size
+        let total_transfer_size: u64 = files.iter().map(|f| f.size).sum();
+        let bytes_sent_so_far = Arc::new(AtomicU64::new(0));
+
         // Send each file
         for (file, path) in files.iter().zip(file_paths.iter()) {
-            self.send_file(address, port, &transfer_id, &token, &file.id, path)
-                .await?;
+            self.send_file(
+                address,
+                port,
+                &transfer_id,
+                &token,
+                &file.id,
+                path,
+                total_transfer_size,
+                bytes_sent_so_far.clone(),
+            )
+            .await?;
 
             tracing::info!("Sent file: {}", file.name);
         }
