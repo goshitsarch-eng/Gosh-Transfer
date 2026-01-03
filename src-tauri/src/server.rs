@@ -16,7 +16,7 @@ use futures_util::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::ErrorKind,
     net::SocketAddr,
     path::Path,
@@ -46,6 +46,8 @@ pub struct ServerState {
     pub approved_tokens: RwLock<HashMap<String, String>>,
     /// Rejected transfers (transfer_id -> reason)
     pub rejected_transfers: RwLock<HashMap<String, String>>,
+    /// Received files per transfer (transfer_id -> set of file_ids)
+    pub received_files: RwLock<HashMap<String, HashSet<String>>>,
     /// Channel to notify UI of events
     pub event_tx: broadcast::Sender<ServerEvent>,
     /// Download directory
@@ -76,6 +78,7 @@ impl ServerState {
             pending_transfers: RwLock::new(HashMap::new()),
             approved_tokens: RwLock::new(HashMap::new()),
             rejected_transfers: RwLock::new(HashMap::new()),
+            received_files: RwLock::new(HashMap::new()),
             event_tx,
             download_dir: RwLock::new(download_dir),
         }
@@ -459,6 +462,45 @@ async fn chunk_upload_handler(
         file_path.display(),
         bytes_received
     );
+
+    // Track received file and check if transfer is complete
+    let transfer_id = params.transfer_id.clone();
+    let file_id = params.file_id.clone();
+
+    // Add file to received set
+    {
+        let mut received = state.received_files.write().await;
+        received
+            .entry(transfer_id.clone())
+            .or_insert_with(HashSet::new)
+            .insert(file_id);
+    }
+
+    // Check if all files have been received
+    let pending = state.pending_transfers.read().await;
+    if let Some(transfer) = pending.get(&transfer_id) {
+        let expected_count = transfer.files.len();
+        let received = state.received_files.read().await;
+        let received_count = received.get(&transfer_id).map(|s| s.len()).unwrap_or(0);
+
+        if received_count >= expected_count {
+            tracing::info!("Transfer {} complete: all {} files received", transfer_id, expected_count);
+
+            // Emit completion event
+            let _ = state.event_tx.send(ServerEvent::TransferComplete {
+                transfer_id: transfer_id.clone(),
+            });
+
+            // Clean up transfer state (drop the read lock first)
+            drop(pending);
+            drop(received);
+
+            // Remove from tracking maps
+            state.pending_transfers.write().await.remove(&transfer_id);
+            state.approved_tokens.write().await.remove(&transfer_id);
+            state.received_files.write().await.remove(&transfer_id);
+        }
+    }
 
     (
         StatusCode::OK,
