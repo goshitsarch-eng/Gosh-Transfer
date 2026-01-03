@@ -8,6 +8,7 @@ use crate::{
     client::{get_network_interfaces, TransferClient},
     favorites::FavoritesStore,
     server::ServerState,
+    settings::SettingsStore,
     types::*,
 };
 use std::{path::PathBuf, sync::Arc};
@@ -19,6 +20,7 @@ pub struct AppState {
     pub favorites: FavoritesStore,
     pub client: TransferClient,
     pub server_state: Arc<ServerState>,
+    pub settings_store: SettingsStore,
     pub settings: RwLock<AppSettings>,
     pub transfer_history: RwLock<Vec<TransferRecord>>,
 }
@@ -241,6 +243,12 @@ pub async fn update_settings(
     app: AppHandle,
     new_settings: AppSettings,
 ) -> Result<(), String> {
+    // Persist settings to disk
+    state
+        .settings_store
+        .update(new_settings.clone())
+        .map_err(|e| e.to_string())?;
+
     let mut settings = state.settings.write().await;
     *settings = new_settings;
     let updated_settings = settings.clone();

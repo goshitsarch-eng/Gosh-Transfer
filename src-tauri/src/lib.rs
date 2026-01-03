@@ -1,25 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0
 // Gosh Transfer - Library exports
-//
-// NOTICE: This project is NOT affiliated with Motrix or any other download manager.
-// This is an independent, open-source project.
 
 pub mod client;
 pub mod commands;
 pub mod favorites;
 pub mod server;
+pub mod settings;
 pub mod types;
 
 use commands::AppState;
 use favorites::FavoritesStore;
+use settings::SettingsStore;
 use tauri::{Emitter, Manager};
 use server::ServerState;
 use std::sync::Arc;
-use types::AppSettings;
 
 /// Initialize the application state
 pub fn init_app_state() -> Result<AppState, types::AppError> {
-    let settings = AppSettings::default();
+    let settings_store = SettingsStore::new()?;
+    let settings = settings_store.get();
     let favorites = FavoritesStore::new()?;
     let client = client::TransferClient::new();
     let server_state = Arc::new(ServerState::new(settings.clone()));
@@ -28,6 +27,7 @@ pub fn init_app_state() -> Result<AppState, types::AppError> {
         favorites,
         client,
         server_state,
+        settings_store,
         settings: tokio::sync::RwLock::new(settings),
         transfer_history: tokio::sync::RwLock::new(Vec::new()),
     })

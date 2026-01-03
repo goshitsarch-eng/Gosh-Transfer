@@ -360,24 +360,6 @@ Application settings including:
   </button>
 </div>
 
-<!-- About Section -->
-<div class="card about-card">
-  <div class="card-body">
-    <div class="about-content">
-      <h3 class="about-title">Gosh Transfer</h3>
-      <p class="about-version">Version 0.1.0</p>
-      <p class="about-description">
-        Simple, explicit file transfers. No discovery magic, no cloud sync.
-      </p>
-      <p class="about-license">
-        Licensed under AGPL-3.0
-      </p>
-      <p class="about-notice">
-        This project is NOT affiliated with Motrix or any other download manager.
-      </p>
-    </div>
-  </div>
-</div>
 
 <style>
   .input-with-button {
@@ -478,44 +460,4 @@ Application settings including:
     color: var(--status-success);
   }
 
-  .about-card {
-    margin-top: var(--space-6);
-    background-color: var(--bg-elevated);
-  }
-
-  .about-content {
-    text-align: center;
-    padding: var(--space-4);
-  }
-
-  .about-title {
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: var(--space-1);
-  }
-
-  .about-version {
-    font-size: var(--font-size-sm);
-    color: var(--text-muted);
-    margin-bottom: var(--space-3);
-  }
-
-  .about-description {
-    font-size: var(--font-size-base);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-2);
-  }
-
-  .about-license {
-    font-size: var(--font-size-sm);
-    color: var(--text-muted);
-    margin-bottom: var(--space-2);
-  }
-
-  .about-notice {
-    font-size: var(--font-size-xs);
-    color: var(--text-muted);
-    font-style: italic;
-  }
 </style>

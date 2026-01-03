@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
 // Gosh Transfer - Shared types for the application
-//
-// NOTICE: This project is NOT affiliated with Motrix or any other download manager.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

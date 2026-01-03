@@ -3,7 +3,6 @@ SPDX-License-Identifier: AGPL-3.0
 Gosh Transfer - Main application component
 
 Single-window UI with permanent sidebar and card-based main content.
-NOTICE: This project is NOT affiliated with Motrix.
 -->
 <script>
   import { onMount } from "svelte";
@@ -16,6 +15,7 @@ NOTICE: This project is NOT affiliated with Motrix.
   import ReceiveView from "./lib/components/ReceiveView.svelte";
   import TransfersView from "./lib/components/TransfersView.svelte";
   import SettingsView from "./lib/components/SettingsView.svelte";
+  import AboutView from "./lib/components/AboutView.svelte";
 
   // Theme controller (set after initialization)
   let themeController = null;
@@ -45,6 +45,7 @@ NOTICE: This project is NOT affiliated with Motrix.
     { id: "receive", label: "Receive", icon: "download" },
     { id: "transfers", label: "Transfers", icon: "history" },
     { id: "settings", label: "Settings", icon: "settings" },
+    { id: "about", label: "About", icon: "info" },
   ];
 
   // Load server status on mount
@@ -192,6 +193,7 @@ NOTICE: This project is NOT affiliated with Motrix.
       download: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>`,
       history: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>`,
       settings: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>`,
+      info: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>`,
     };
     return icons[name] || "";
   }
@@ -267,6 +269,8 @@ NOTICE: This project is NOT affiliated with Motrix.
       <TransfersView />
     {:else if currentView === "settings"}
       <SettingsView {serverStatus} onThemeChange={handleThemeChange} />
+    {:else if currentView === "about"}
+      <AboutView />
     {/if}
   </main>
 </div>
