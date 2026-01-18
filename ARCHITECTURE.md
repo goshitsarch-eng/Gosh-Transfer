@@ -1,10 +1,6 @@
 # Architecture
 
-This document describes the internal architecture of Gosh Transfer based on code analysis.
-
-## Transfer Engine
-
-This project uses [gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-lan-transfer) as its core transfer engine.
+Gosh Transfer is a Tauri 2 desktop application with a Rust backend and Svelte 5 frontend. All file transfer logic is delegated to the [gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-lan-transfer) engine library.
 
 ## Module Structure
 
@@ -13,13 +9,12 @@ This project uses [gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-la
 ```
 src/
 ├── main.rs         # Entry point, calls lib::run()
-├── lib.rs          # App initialization, server startup, event forwarding
-├── types.rs        # All shared data structures
-├── server.rs       # Axum HTTP server for receiving files
-├── client.rs       # HTTP client for sending files
+├── lib.rs          # App initialization, plugin setup, event forwarding
 ├── commands.rs     # Tauri IPC command handlers
-├── settings.rs     # Settings persistence
-└── favorites.rs    # Favorites persistence
+├── types.rs        # Shared data structures for serialization
+├── settings.rs     # Settings persistence (settings.json)
+├── favorites.rs    # Favorites persistence (favorites.json)
+└── history.rs      # Transfer history persistence (history.json)
 ```
 
 ### Frontend (`src/`)
@@ -29,12 +24,12 @@ src/
 ├── main.js                     # Svelte app mount
 ├── App.svelte                  # Main layout, navigation, event listeners
 ├── lib/
-│   ├── theme.js                # Theme switching logic
+│   ├── theme.js                # Theme switching, platform detection
 │   └── components/
-│       ├── SendView.svelte     # File sending UI
-│       ├── ReceiveView.svelte  # Incoming transfer UI
-│       ├── TransfersView.svelte # Transfer history
-│       ├── SettingsView.svelte  # Settings UI
+│       ├── SendView.svelte     # File/folder sending UI
+│       ├── ReceiveView.svelte  # Incoming transfer approval
+│       ├── TransfersView.svelte # Transfer history display
+│       ├── SettingsView.svelte  # Settings form
 │       └── AboutView.svelte     # About page
 └── styles/
     └── global.css              # Global styles
@@ -42,188 +37,152 @@ src/
 
 ## State Management
 
-### AppState (`commands.rs:19-26`)
+### AppState (`commands.rs:14-21`)
 
 Central state managed by Tauri:
 
 ```rust
 pub struct AppState {
-    pub favorites: FavoritesStore,        // Persisted to disk
-    pub client: TransferClient,           // HTTP client singleton
-    pub server_state: Arc<ServerState>,   // Shared with server task
-    pub settings_store: SettingsStore,    // Persisted to disk
-    pub settings: RwLock<AppSettings>,    // In-memory copy
-    pub transfer_history: RwLock<Vec<TransferRecord>>, // Volatile
-}
-```
-
-### ServerState (`server.rs:40-55`)
-
-State for the HTTP server:
-
-```rust
-pub struct ServerState {
+    pub favorites: FavoritesStore,
+    pub engine: Arc<Mutex<GoshTransferEngine>>,
+    pub event_rx: Arc<Mutex<Option<broadcast::Receiver<EngineEvent>>>>,
+    pub settings_store: SettingsStore,
     pub settings: RwLock<AppSettings>,
-    pub pending_transfers: RwLock<HashMap<String, PendingTransfer>>,
-    pub approved_tokens: RwLock<HashMap<String, String>>,
-    pub rejected_transfers: RwLock<HashMap<String, String>>,
-    pub received_files: RwLock<HashMap<String, HashSet<String>>>,
-    pub event_tx: broadcast::Sender<ServerEvent>,
-    pub download_dir: RwLock<PathBuf>,
+    pub history_store: HistoryStore,
 }
 ```
+
+The `GoshTransferEngine` from the engine crate handles all HTTP server/client operations, transfer state, and networking.
 
 ## Event Flow
 
-### Server to Frontend
+### Engine to Frontend
 
 ```
-Server (Axum)
-    → ServerEvent (broadcast channel)
-    → lib.rs event forwarder
+GoshTransferEngine
+    → EngineEvent (broadcast channel)
+    → lib.rs event handler
     → Tauri emit()
     → Frontend listen()
 ```
 
-Events:
-- `transfer-request` - New incoming transfer
-- `transfer-progress` - Bytes received update
-- `transfer-complete` - All files received
-- `transfer-failed` - Error during receive
+Events forwarded:
 
-### Client to Frontend
-
-```
-TransferClient
-    → TransferProgress (broadcast channel)
-    → lib.rs event forwarder
-    → Tauri emit("send-progress")
-    → Frontend listen()
-```
+| Event | Payload |
+|-------|---------|
+| `transfer-request` | transfer object |
+| `transfer-progress` | transferId, bytesTransferred, totalBytes, currentFile, speedBps |
+| `transfer-complete` | transferId |
+| `transfer-failed` | transferId, error |
+| `transfer-retry` | transferId, attempt, maxAttempts, error |
+| `server-started` | port |
+| `server-stopped` | (none) |
+| `port-changed` | oldPort, newPort |
 
 ### Frontend to Backend
 
 ```
 Frontend invoke()
     → Tauri command handler
-    → AppState access
+    → AppState / Engine access
     → Result returned
 ```
 
-## Transfer Protocol Detail
+## Tauri Commands
 
-### Sending Files
+### Favorites
+| Command | Returns |
+|---------|---------|
+| `list_favorites()` | `Vec<Favorite>` |
+| `add_favorite(name, address)` | `Favorite` |
+| `update_favorite(id, name?, address?)` | `Favorite` |
+| `delete_favorite(id)` | `()` |
 
-1. **Resolve hostname** (`client.rs:61-102`)
-   - If already IP: return immediately
-   - Otherwise: DNS lookup via `ToSocketAddrs`
+### Network
+| Command | Returns |
+|---------|---------|
+| `resolve_hostname(address)` | `ResolveResult` |
+| `get_interfaces()` | `Vec<NetworkInterface>` |
+| `check_peer(address, port)` | `bool` |
+| `get_peer_info(address, port)` | `JSON` |
 
-2. **Request transfer** (`client.rs:155-197`)
-   - POST to `/transfer` with `TransferRequest`
-   - Contains: transfer_id, sender_name, files[], total_size
+### Transfers
+| Command | Returns |
+|---------|---------|
+| `send_files(address, port, file_paths)` | `()` |
+| `send_directory(address, port, directory_path)` | `()` |
+| `accept_transfer(transfer_id)` | `String` (token) |
+| `reject_transfer(transfer_id)` | `()` |
+| `cancel_transfer(transfer_id)` | `()` |
+| `accept_all_transfers()` | `Vec<String>` (accepted IDs) |
+| `reject_all_transfers()` | `()` |
+| `get_pending_transfers()` | `Vec<PendingTransfer>` |
+| `get_transfer_history()` | `Vec<TransferRecord>` |
+| `clear_transfer_history()` | `()` |
 
-3. **Handle response**
-   - If `accepted: true`: proceed with token
-   - If `accepted: false`: poll `/transfer/status` every 500ms for 120s
+### Settings
+| Command | Returns |
+|---------|---------|
+| `get_settings()` | `AppSettings` |
+| `update_settings(new_settings)` | `()` |
+| `add_trusted_host(host)` | `()` |
+| `remove_trusted_host(host)` | `()` |
 
-4. **Send files** (`client.rs:252-344`)
-   - For each file: POST to `/chunk` with query params
-   - Stream file content as body
-   - Track progress with atomic counter
+### Server
+| Command | Returns |
+|---------|---------|
+| `get_server_status()` | `JSON` |
 
-### Receiving Files
+## Configuration
 
-1. **Accept request** (`server.rs:196-278`)
-   - Create `PendingTransfer` record
-   - If trusted host: auto-accept with token
-   - Otherwise: emit `TransferRequest` event, return pending
-
-2. **Status polling** (`server.rs:281-319`)
-   - Check approved_tokens map
-   - Check rejected_transfers map
-   - Check pending_transfers map
-   - Return appropriate status
-
-3. **Receive chunks** (`server.rs:322-513`)
-   - Verify token matches
-   - Create file with conflict resolution
-   - Stream body to file
-   - Emit progress events
-   - Track received files per transfer
-   - Emit complete when all files received
-
-## File Conflict Resolution (`server.rs:141-173`)
-
-When writing received files:
-
-```
-file.txt → file.txt
-file.txt (exists) → file (1).txt
-file (1).txt (exists) → file (2).txt
-...up to (999)
-```
-
-Uses `OpenOptions::create_new(true)` for atomic uniqueness check.
-
-## Configuration Paths
-
-Determined by `directories::ProjectDirs::from("com", "gosh", "transfer")`:
+Settings, favorites, and history are stored in the OS config directory. Path determined by `directories::ProjectDirs::from("com", "gosh", "transfer")`:
 
 | Platform | Path |
 |----------|------|
 | macOS | `~/Library/Application Support/com.gosh.transfer/` |
 | Windows | `%APPDATA%\gosh\transfer\config\` |
+| Linux | `~/.config/com.gosh.transfer/` |
 
-## Tauri Commands Reference
+Files:
+| File | Purpose |
+|------|---------|
+| `settings.json` | Application settings |
+| `favorites.json` | Saved peer addresses |
+| `history.json` | Transfer history (max 100 entries, FIFO) |
 
-### Favorites
-- `list_favorites() → Vec<Favorite>`
-- `add_favorite(name, address) → Favorite`
-- `update_favorite(id, name?, address?) → Favorite`
-- `delete_favorite(id)`
+## Tauri Plugins
 
-### Network
-- `resolve_hostname(address) → ResolveResult`
-- `get_interfaces() → Vec<NetworkInterface>`
-- `check_peer(address, port) → bool`
-- `get_peer_info(address, port) → JSON`
+| Plugin | Purpose |
+|--------|---------|
+| `tauri-plugin-shell` | Open URLs in browser |
+| `tauri-plugin-dialog` | File/folder picker dialogs |
+| `tauri-plugin-os` | Platform detection |
+| `tauri-plugin-notification` | System notifications |
 
-### Transfers
-- `send_files(address, port, file_paths)`
-- `accept_transfer(transfer_id) → token`
-- `reject_transfer(transfer_id)`
-- `get_pending_transfers() → Vec<PendingTransfer>`
-- `get_transfer_history() → Vec<TransferRecord>`
-- `clear_transfer_history()`
+## Platform Effects
 
-### Settings
-- `get_settings() → AppSettings`
-- `update_settings(new_settings)`
-- `add_trusted_host(host)`
-- `remove_trusted_host(host)`
+Window effects are applied conditionally at startup (`lib.rs:110-125`):
 
-### Server
-- `get_server_status() → JSON`
+| Platform | Effect |
+|----------|--------|
+| macOS | NSVisualEffectMaterial::Sidebar vibrancy |
+| Windows | Mica backdrop |
+| Linux | None (standard window) |
 
-## Timeouts and Constants
+## Transfer Protocol
 
-| Constant | Value | Location |
-|----------|-------|----------|
-| Server port | 53317 | `lib.rs:61` |
-| Connect timeout | 10s | `client.rs:45` |
-| Read timeout | 60s | `client.rs:44` |
-| Approval timeout | 120s | `client.rs:209` |
-| Approval poll interval | 500ms | `client.rs:210` |
-| Progress throttle | 32KB | `client.rs:300` |
-| Filename conflict limit | 1000 | `server.rs:147` |
-| Event channel capacity | 100 | `server.rs:73` |
+The HTTP protocol is implemented by the gosh-lan-transfer engine. Default port is 53317.
 
-## Unimplemented Features
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/health` | GET | Connectivity check |
+| `/info` | GET | Device name and version |
+| `/transfer` | POST | Initiate transfer request |
+| `/transfer/status` | GET | Poll approval status |
+| `/chunk` | POST | Stream file data |
+| `/events` | GET | SSE for real-time progress |
 
-Based on code analysis, these are declared but not functional:
+## Known Limitations
 
-1. **Port configuration** - Setting stored but server uses hardcoded value
-2. **System notifications** - `notifications_enabled` setting exists but no notification code
-3. **Transfer speed** - `speed_bps` always 0 (has TODO comment)
-4. **IPv6** - Code comment claims dual-stack but only binds IPv4
-5. **Transfer history persistence** - In-memory only
+1. Server binds to IPv4 only (`0.0.0.0`)
+2. Trusted hosts require exact IP match (hostnames not resolved)
