@@ -10,7 +10,7 @@ Powered by [gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-lan-trans
 
 ## Linux Version
 
-Looking for a native Linux experience? Check out [Gosh Transfer GTK](https://github.com/goshitsarch-eng/gosh-transfer-gtk), an independent GTK4/libadwaita implementation built specifically for Linux desktops. It shares the same transfer engine but offers a native GNOME-style interface.
+Looking for a native Linux experience? Check out [Gosh Transfer Linux](https://github.com/goshitsarch-eng/gosh-transfer-linux), an independent GTK4/libadwaita implementation built specifically for Linux desktops. It shares the same transfer engine but offers a native GNOME-style interface.
 
 ## Screenshots
 
