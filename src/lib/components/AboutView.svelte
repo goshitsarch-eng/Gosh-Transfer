@@ -28,7 +28,7 @@ Gosh Transfer - About View
         </svg>
       </div>
       <h3 class="about-title">Gosh Transfer</h3>
-      <p class="about-version">Version 2.0.3</p>
+      <p class="about-version">Version 2.1.0</p>
       <p class="about-description">
         Simple, explicit file transfers. No auto-discovery, no cloud sync.
       </p>
