@@ -30,7 +30,7 @@ Gosh Transfer - About View
       <h3 class="about-title">Gosh Transfer</h3>
       <p class="about-version">Version 2.0.3</p>
       <p class="about-description">
-        Simple, explicit file transfers. No discovery magic, no cloud sync.
+        Simple, explicit file transfers. No auto-discovery, no cloud sync.
       </p>
       <p class="about-license">
         Licensed under AGPL-3.0

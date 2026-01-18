@@ -44,7 +44,7 @@
     ],
     "category": "Utility",
     "shortDescription": "Simple, explicit file transfers",
-    "longDescription": "Gosh Transfer is a clean, deterministic file transfer application. No discovery magic, no cloud sync—just explicit IP/hostname transfers that work reliably over LAN, Tailscale, and VPNs.",
+    "longDescription": "Gosh Transfer is a clean, deterministic file transfer application. No auto-discovery, no cloud sync—just explicit IP/hostname transfers that work reliably over LAN, Tailscale, and VPNs.",
     "macOS": {
       "minimumSystemVersion": "10.15",
       "frameworks": [],

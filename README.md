@@ -4,7 +4,7 @@ A cross-platform desktop application for explicit file transfers over LAN, Tails
 
 ## What It Does
 
-Gosh Transfer sends files and folders between computers using explicit IP addresses or hostnames. No auto-discovery, no cloud services, no magic—you specify exactly where files go.
+Gosh Transfer sends files and folders between computers using explicit IP addresses or hostnames. No auto-discovery, no cloud services—you specify exactly where files go.
 
 Powered by [gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-lan-transfer), a standalone Rust library for peer-to-peer file transfers.
 

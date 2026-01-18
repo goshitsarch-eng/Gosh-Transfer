@@ -16,7 +16,7 @@ Gosh Transfer addresses both by providing direct peer-to-peer transfers where th
 
 ### Product Vision
 
-A file transfer tool that works everywhere your network reaches, without surprises. You type an address, you send files, they arrive. No accounts, no cloud, no discovery magic.
+A file transfer tool that works everywhere your network reaches, without surprises. You type an address, you send files, they arrive. No accounts, no cloud, no auto-discovery.
 
 ## Target Users
 
