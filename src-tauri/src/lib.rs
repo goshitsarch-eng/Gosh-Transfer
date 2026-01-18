@@ -3,12 +3,14 @@
 
 pub mod commands;
 pub mod favorites;
+pub mod history;
 pub mod settings;
 pub mod types;
 
 use commands::AppState;
 use favorites::FavoritesStore;
 use gosh_lan_transfer::{EngineConfig, EngineEvent, GoshTransferEngine};
+use history::HistoryStore;
 use settings::SettingsStore;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -19,6 +21,7 @@ pub fn init_app_state() -> Result<AppState, types::AppError> {
     let settings_store = SettingsStore::new()?;
     let settings = settings_store.get();
     let favorites = FavoritesStore::new()?;
+    let history_store = HistoryStore::new()?;
 
     // Build engine config from app settings
     let engine_config = EngineConfig::builder()
@@ -38,7 +41,7 @@ pub fn init_app_state() -> Result<AppState, types::AppError> {
         event_rx: Arc::new(Mutex::new(Some(event_rx))),
         settings_store,
         settings: tokio::sync::RwLock::new(settings),
-        transfer_history: tokio::sync::RwLock::new(Vec::new()),
+        history_store,
     })
 }
 
@@ -70,6 +73,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             // Favorites
@@ -84,8 +88,12 @@ pub fn run() {
             commands::get_peer_info,
             // Transfers
             commands::send_files,
+            commands::send_directory,
             commands::accept_transfer,
             commands::reject_transfer,
+            commands::cancel_transfer,
+            commands::accept_all_transfers,
+            commands::reject_all_transfers,
             commands::get_pending_transfers,
             commands::get_transfer_history,
             commands::clear_transfer_history,
@@ -130,6 +138,8 @@ pub fn run() {
             let event_rx = app.state::<AppState>().event_rx.clone();
 
             tauri::async_runtime::spawn(async move {
+                use tauri_plugin_notification::NotificationExt;
+
                 let mut rx = {
                     let mut guard = event_rx.lock().await;
                     match guard.take() {
@@ -140,27 +150,66 @@ pub fn run() {
 
                 while let Ok(event) = rx.recv().await {
                     let (event_name, payload) = match &event {
-                        EngineEvent::TransferRequest(transfer) => (
-                            "transfer-request",
-                            serde_json::json!({
-                                "type": "transferRequest",
-                                "transfer": transfer
-                            }),
-                        ),
+                        EngineEvent::TransferRequest(transfer) => {
+                            // Send notification for incoming transfer
+                            let state = app_handle.state::<AppState>();
+                            let settings = state.settings.read().await;
+                            if settings.notifications_enabled {
+                                let sender = transfer.sender_name.as_deref().unwrap_or("Unknown Device");
+                                let file_count = transfer.files.len();
+                                let body = if file_count == 1 {
+                                    format!("{} wants to send you a file", sender)
+                                } else {
+                                    format!("{} wants to send you {} files", sender, file_count)
+                                };
+                                let _ = app_handle.notification()
+                                    .builder()
+                                    .title("Incoming Transfer")
+                                    .body(&body)
+                                    .show();
+                            }
+
+                            (
+                                "transfer-request",
+                                serde_json::json!({
+                                    "type": "transferRequest",
+                                    "transfer": transfer
+                                }),
+                            )
+                        }
                         EngineEvent::TransferProgress(progress) => (
                             "transfer-progress",
                             serde_json::json!({
                                 "type": "progress",
-                                "progress": progress
+                                "progress": {
+                                    "transferId": progress.transfer_id,
+                                    "bytesTransferred": progress.bytes_transferred,
+                                    "totalBytes": progress.total_bytes,
+                                    "currentFile": progress.current_file,
+                                    "speedBps": progress.speed_bps
+                                }
                             }),
                         ),
-                        EngineEvent::TransferComplete { transfer_id } => (
-                            "transfer-complete",
-                            serde_json::json!({
-                                "type": "transferComplete",
-                                "transferId": transfer_id
-                            }),
-                        ),
+                        EngineEvent::TransferComplete { transfer_id } => {
+                            // Send notification for completed transfer
+                            let state = app_handle.state::<AppState>();
+                            let settings = state.settings.read().await;
+                            if settings.notifications_enabled {
+                                let _ = app_handle.notification()
+                                    .builder()
+                                    .title("Transfer Complete")
+                                    .body("Files received successfully")
+                                    .show();
+                            }
+
+                            (
+                                "transfer-complete",
+                                serde_json::json!({
+                                    "type": "transferComplete",
+                                    "transferId": transfer_id
+                                }),
+                            )
+                        }
                         EngineEvent::TransferFailed { transfer_id, error } => (
                             "transfer-failed",
                             serde_json::json!({
@@ -180,6 +229,24 @@ pub fn run() {
                             "server-stopped",
                             serde_json::json!({
                                 "type": "serverStopped"
+                            }),
+                        ),
+                        EngineEvent::TransferRetry { transfer_id, attempt, max_attempts, error } => (
+                            "transfer-retry",
+                            serde_json::json!({
+                                "type": "transferRetry",
+                                "transferId": transfer_id,
+                                "attempt": attempt,
+                                "maxAttempts": max_attempts,
+                                "error": error
+                            }),
+                        ),
+                        EngineEvent::PortChanged { old_port, new_port } => (
+                            "port-changed",
+                            serde_json::json!({
+                                "type": "portChanged",
+                                "oldPort": old_port,
+                                "newPort": new_port
                             }),
                         ),
                     };

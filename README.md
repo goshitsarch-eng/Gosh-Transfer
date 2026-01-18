@@ -4,9 +4,13 @@ A cross-platform desktop application for explicit file transfers over LAN, Tails
 
 ## What It Does
 
-Gosh Transfer sends files between computers using explicit IP addresses or hostnames. No auto-discovery, no cloud services, no magic you specify where files go.
+Gosh Transfer sends files and folders between computers using explicit IP addresses or hostnames. No auto-discovery, no cloud services, no magic—you specify exactly where files go.
 
 Powered by [gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-lan-transfer), a standalone Rust library for peer-to-peer file transfers.
+
+## Linux Version
+
+Looking for a native Linux experience? Check out [Gosh Transfer GTK](https://github.com/goshitsarch-eng/gosh-transfer-gtk), an independent GTK4/libadwaita implementation built specifically for Linux desktops. It shares the same transfer engine but offers a native GNOME-style interface.
 
 ## Screenshots
 
@@ -16,34 +20,20 @@ Powered by [gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-lan-trans
 ![Screenshot 4](screenshots/img4.png)
 ![Screenshot 5](screenshots/img5.png)
 
-
 ## Features
 
-- **Send files** to a specific IP/hostname with drag-and-drop or file picker
-- **Receive files** with manual accept/reject for each transfer request
-- **Favorites** for saving frequently-used peer addresses
-- **Trusted hosts** for auto-accepting transfers from specific IPs
-- **Receive-only mode** to disable sending
-- **Theme support** (dark/light/system)
+Send files or entire folders to any IP or hostname using drag and drop or the file picker. Incoming transfers require manual approval unless the sender is on your trusted hosts list. Save frequently used addresses as favorites for quick access. The app supports dark, light, and system themes, and can run in receive-only mode if you prefer.
 
-## Technical Details
+Transfer progress shows real-time speed, and you can cancel transfers mid-flight. When multiple transfers arrive at once, batch accept or reject them all. System notifications alert you to incoming transfers even when the app is in the background.
 
-### Architecture
+## Architecture
 
-| Component | Technology |
-|-----------|------------|
-| Backend | Rust + Tauri 2 |
-| Transfer Engine | [gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-lan-transfer) |
-| HTTP Server | Axum 0.8 |
-| HTTP Client | Reqwest 0.12 |
-| Frontend | Svelte 5 |
-| Bundler | Vite 7 |
+This version uses Tauri 2 with a Rust backend and Svelte 5 frontend. The transfer engine ([gosh-lan-transfer](https://github.com/goshitsarch-eng/gosh-lan-transfer)) provides an Axum HTTP server for receiving and Reqwest for sending.
+
+The application runs an HTTP server on port 53317 by default. Port changes take effect immediately without restarting.
 
 ### Network Protocol
 
-The application runs an HTTP server on port **53317** (hardcoded, not configurable at runtime).
-
-**Endpoints:**
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/health` | GET | Connectivity check |
@@ -53,76 +43,39 @@ The application runs an HTTP server on port **53317** (hardcoded, not configurab
 | `/chunk` | POST | Stream file data |
 | `/events` | GET | SSE for real-time progress |
 
-**Transfer Flow:**
-1. Sender POSTs to `/transfer` with file metadata
-2. If trusted host: immediate acceptance with token
-3. Otherwise: receiver sees approval prompt, sender polls `/transfer/status`
-4. On accept: sender streams each file to `/chunk` with token
-5. Receiver writes to download directory with conflict resolution (`file (1).ext`, etc.)
-
 ### Data Storage
 
-Settings and favorites are stored in the OS-appropriate config directory:
-- macOS: `~/Library/Application Support/com.gosh.transfer/`
-- Windows: `%APPDATA%\gosh\transfer\config\`
+Settings, favorites, and transfer history are stored in the OS config directory:
 
-Files:
-- `settings.json` - Application settings
-- `favorites.json` - Saved peers
-
-**Note:** Transfer history is stored in memory only and is lost when the application closes.
-
-### Settings
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `port` | u16 | 53317 | Stored but not applied at runtime |
-| `deviceName` | string | hostname | Shown to peers |
-| `downloadDir` | path | OS Downloads folder | Where received files are saved |
-| `trustedHosts` | string[] | [] | IPs for auto-accept (exact match only) |
-| `receiveOnly` | bool | false | Hides Send tab |
-| `notificationsEnabled` | bool | true | Stored but not implemented |
-| `theme` | string | "system" | "dark", "light", or "system" |
+| Platform | Location |
+|----------|----------|
+| macOS | `~/Library/Application Support/com.gosh.transfer/` |
+| Windows | `%APPDATA%\gosh\transfer\config\` |
+| Linux | `~/.config/com.gosh.transfer/` |
 
 ## Building
 
-### Prerequisites
-
-- Node.js 18+
-- Rust 1.70+
-- Platform-specific dependencies for Tauri
-
-### Development
+Requires Node.js 18+ and Rust 1.70+, plus platform-specific Tauri dependencies.
 
 ```bash
+# Development
 npm install
 npm run tauri dev
-```
 
-### Production Build
-
-```bash
+# Production
 npm run tauri build
 ```
 
-Outputs: .exe/.msi (Windows), .dmg (macOS)
-
 ## Known Limitations
 
-1. **Port is hardcoded** - The port setting in the UI is saved but the server always binds to 53317
-2. **IPv4 only** - Despite code comments, the server binds only to `0.0.0.0`
-3. **No transfer speed display** - Speed calculation is not implemented (always shows 0)
-4. **System notifications** - Setting exists but notifications are not sent
-5. **Trusted hosts use exact IP match** - Hostnames in trusted hosts won't work without prior resolution
-6. **Transfer history volatile** - Lost on application close
+The server binds to IPv4 only (`0.0.0.0`). Trusted hosts require exact IP matches; hostnames won't work unless previously resolved.
 
 ## Disclaimer
 
-This application is an independent project and is not sponsored by, endorsed by, or affiliated with Localsend or GitHub, Inc.
+This application is an independent project, not sponsored by or affiliated with LocalSend or GitHub, Inc.
 
-This software is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). It is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability or fitness for a particular purpose. Use at your own risk.
+Licensed under AGPL-3.0. Provided "as is" without warranty. Use at your own risk.
 
 ## License
 
-AGPL-3.0 - See [LICENSE](LICENSE)
-
+AGPL-3.0 — See [LICENSE](LICENSE)

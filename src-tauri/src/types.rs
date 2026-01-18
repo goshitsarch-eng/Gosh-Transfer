@@ -54,6 +54,7 @@ pub enum TransferStatus {
     Completed,
     Failed,
     Rejected,
+    Cancelled,
 }
 
 /// A single file in a transfer

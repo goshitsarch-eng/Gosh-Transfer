@@ -201,7 +201,7 @@ Application settings including:
         max="65535"
       />
       <p class="form-hint">
-        Default: 53317. Requires restart to take effect.
+        Default: 53317. Changes take effect immediately.
       </p>
     </div>
 

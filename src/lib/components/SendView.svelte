@@ -31,6 +31,7 @@ Includes:
 
   // File selection state
   let selectedFiles = $state([]);
+  let selectedDirectory = $state(null); // { path, name, itemCount }
   let isDragging = $state(false);
   let fileAddError = $state("");
   let hasTauriDrop = $state(false);
@@ -39,7 +40,8 @@ Includes:
   let isSending = $state(false);
   let sendError = $state("");
   let sendSuccess = $state(false);
-  let sendProgress = $state(null); // { status, bytesTransferred, totalBytes, currentFile }
+  let sendProgress = $state(null); // { status, bytesTransferred, totalBytes, currentFile, speedBps }
+  let currentTransferId = $state(null);
 
   // Default port
   const DEFAULT_PORT = 53317;
@@ -55,9 +57,16 @@ Includes:
     // Listen for send progress updates
     const unlistenProgress = await listen("send-progress", (event) => {
       if (isSending) {
+        const data = event.payload;
+        if (data.transferId) {
+          currentTransferId = data.transferId;
+        }
         sendProgress = {
           ...sendProgress,
-          ...event.payload,
+          bytesTransferred: data.bytesTransferred || sendProgress?.bytesTransferred || 0,
+          totalBytes: data.totalBytes || sendProgress?.totalBytes || 0,
+          currentFile: data.currentFile || sendProgress?.currentFile,
+          speedBps: data.speedBps || 0,
           status: 'sending'
         };
       }
@@ -189,11 +198,40 @@ Includes:
       if (selected) {
         const paths = Array.isArray(selected) ? selected : [selected];
         addFilePaths(paths);
+        // Clear directory selection when files are selected
+        selectedDirectory = null;
       }
     } catch (e) {
       console.error("Failed to open file picker:", e);
       fileAddError = `Failed to open file picker: ${e.toString()}`;
     }
+  }
+
+  // Open folder picker
+  async function openFolderPicker() {
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: true,
+      });
+
+      if (selected) {
+        // Clear file selection when directory is selected
+        selectedFiles = [];
+        selectedDirectory = {
+          path: selected,
+          name: selected.split(/[/\\]/).pop(),
+        };
+      }
+    } catch (e) {
+      console.error("Failed to open folder picker:", e);
+      fileAddError = `Failed to open folder picker: ${e.toString()}`;
+    }
+  }
+
+  // Clear directory selection
+  function clearDirectory() {
+    selectedDirectory = null;
   }
 
   function addFilePaths(paths) {
@@ -256,49 +294,82 @@ Includes:
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
   }
 
-  // Send files
+  // Send files or directory
   async function sendFiles() {
-    if (!resolveResult?.success || selectedFiles.length === 0) return;
+    const hasFiles = selectedFiles.length > 0;
+    const hasDirectory = selectedDirectory !== null;
+
+    if (!resolveResult?.success || (!hasFiles && !hasDirectory)) return;
 
     isSending = true;
     sendError = "";
     sendSuccess = false;
+    currentTransferId = null;
 
     // Initialize progress
-    const totalBytes = selectedFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+    const totalBytes = hasDirectory ? 0 : selectedFiles.reduce((sum, f) => sum + (f.size || 0), 0);
     sendProgress = {
       status: 'waiting',
       bytesTransferred: 0,
       totalBytes: totalBytes,
-      currentFile: null
+      currentFile: null,
+      speedBps: 0
     };
 
     try {
       const ip = resolveResult.ips[0];
-      const filePaths = selectedFiles.map((f) => f.path);
 
-      await invoke("send_files", {
-        address: ip,
-        port: DEFAULT_PORT,
-        filePaths: filePaths,
-      });
+      if (hasDirectory) {
+        await invoke("send_directory", {
+          address: ip,
+          port: DEFAULT_PORT,
+          directoryPath: selectedDirectory.path,
+        });
+        selectedDirectory = null;
+      } else {
+        const filePaths = selectedFiles.map((f) => f.path);
+        await invoke("send_files", {
+          address: ip,
+          port: DEFAULT_PORT,
+          filePaths: filePaths,
+        });
+        selectedFiles = [];
+      }
 
       sendSuccess = true;
-      selectedFiles = [];
-
-      // Optionally save as favorite
-      // await saveFavoritePrompt();
     } catch (e) {
       sendError = e.toString();
     } finally {
       isSending = false;
       sendProgress = null;
+      currentTransferId = null;
+    }
+  }
+
+  // Cancel ongoing transfer
+  async function cancelTransfer() {
+    if (!currentTransferId) return;
+
+    try {
+      await invoke("cancel_transfer", { transferId: currentTransferId });
+      sendError = "Transfer cancelled";
+    } catch (e) {
+      console.error("Failed to cancel transfer:", e);
     }
   }
 
   // Check if send is enabled
   function canSend() {
-    return resolveResult?.success && selectedFiles.length > 0 && !isSending;
+    const hasContent = selectedFiles.length > 0 || selectedDirectory !== null;
+    return resolveResult?.success && hasContent && !isSending;
+  }
+
+  // Format speed
+  function formatSpeed(bytesPerSec) {
+    if (!bytesPerSec || bytesPerSec === 0) return "";
+    const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+    const i = Math.floor(Math.log(bytesPerSec) / Math.log(1024));
+    return `${(bytesPerSec / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
   }
 </script>
 
@@ -432,7 +503,7 @@ Includes:
 <div class="card">
   <div class="card-header">
     <h3 class="card-title">Files</h3>
-    <p class="card-subtitle">Select files to send</p>
+    <p class="card-subtitle">Select files or a folder to send</p>
   </div>
   <div class="card-body">
     <!-- Drop zone -->
@@ -450,8 +521,37 @@ Includes:
       <p class="drop-zone-text">Drop files here or click to browse</p>
       <p class="drop-zone-hint">Supports any file type</p>
     </div>
+
+    <!-- Folder picker button -->
+    <button class="btn btn-secondary mt-3" onclick={openFolderPicker} style="width: 100%;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+      </svg>
+      Select Folder
+    </button>
+
     {#if fileAddError}
       <div class="form-error mt-2">{fileAddError}</div>
+    {/if}
+
+    <!-- Selected directory -->
+    {#if selectedDirectory}
+      <div class="selected-directory mt-4">
+        <div class="directory-item">
+          <svg class="folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
+          <div class="directory-info">
+            <div class="directory-name">{selectedDirectory.name}</div>
+            <div class="directory-path">{selectedDirectory.path}</div>
+          </div>
+          <button class="file-remove" onclick={clearDirectory}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
     {/if}
 
     <!-- Selected files list -->
@@ -498,11 +598,16 @@ Includes:
               Sending{sendProgress.currentFile ? `: ${sendProgress.currentFile}` : '...'}
             {/if}
           </span>
-          {#if sendProgress.totalBytes > 0}
-            <span class="progress-size">
-              {formatSize(sendProgress.bytesTransferred || 0)} / {formatSize(sendProgress.totalBytes)}
-            </span>
-          {/if}
+          <div class="progress-stats">
+            {#if sendProgress.speedBps > 0}
+              <span class="progress-speed">{formatSpeed(sendProgress.speedBps)}</span>
+            {/if}
+            {#if sendProgress.totalBytes > 0}
+              <span class="progress-size">
+                {formatSize(sendProgress.bytesTransferred || 0)} / {formatSize(sendProgress.totalBytes)}
+              </span>
+            {/if}
+          </div>
         </div>
         <div class="progress-bar">
           <div
@@ -514,25 +619,38 @@ Includes:
       </div>
     {/if}
 
-    <button
-      class="btn btn-primary btn-lg"
-      disabled={!canSend()}
-      onclick={sendFiles}
-      style="width: 100%;"
-    >
-      {#if isSending}
-        {#if sendProgress?.status === 'waiting'}
-          Waiting for approval...
+    <div class="send-actions">
+      <button
+        class="btn btn-primary btn-lg"
+        disabled={!canSend()}
+        onclick={sendFiles}
+        style="flex: 1;"
+      >
+        {#if isSending}
+          {#if sendProgress?.status === 'waiting'}
+            Waiting for approval...
+          {:else}
+            Sending...
+          {/if}
         {:else}
-          Sending...
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+          </svg>
+          {selectedDirectory ? 'Send Folder' : 'Send Files'}
         {/if}
-      {:else}
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-        </svg>
-        Send Files
+      </button>
+      {#if isSending}
+        <button
+          class="btn btn-destructive btn-lg"
+          onclick={cancelTransfer}
+          title="Cancel transfer"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
       {/if}
-    </button>
+    </div>
   </div>
 </div>
 
@@ -558,6 +676,18 @@ Includes:
 
   .progress-status {
     color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .progress-stats {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .progress-speed {
+    color: var(--accent);
+    font-size: var(--font-size-sm);
     font-weight: 500;
   }
 
@@ -591,5 +721,50 @@ Includes:
     100% {
       transform: translateX(400%);
     }
+  }
+
+  .send-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .selected-directory {
+    background: var(--bg-elevated);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+  }
+
+  .directory-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .folder-icon {
+    width: 24px;
+    height: 24px;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .directory-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .directory-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .directory-path {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

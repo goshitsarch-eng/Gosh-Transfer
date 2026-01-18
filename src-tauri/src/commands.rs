@@ -4,7 +4,7 @@
 // All UI interactions go through these commands.
 // The frontend communicates ONLY via Tauri commands/events.
 
-use crate::{favorites::FavoritesStore, settings::SettingsStore, types::*};
+use crate::{favorites::FavoritesStore, history::HistoryStore, settings::SettingsStore, types::*};
 use gosh_lan_transfer::{EngineConfig, EngineEvent, GoshTransferEngine};
 use std::{path::PathBuf, sync::Arc};
 use tauri::{AppHandle, Emitter, State};
@@ -17,7 +17,7 @@ pub struct AppState {
     pub event_rx: Arc<Mutex<Option<broadcast::Receiver<EngineEvent>>>>,
     pub settings_store: SettingsStore,
     pub settings: RwLock<AppSettings>,
-    pub transfer_history: RwLock<Vec<TransferRecord>>,
+    pub history_store: HistoryStore,
 }
 
 // ============================================================================
@@ -142,6 +142,23 @@ pub async fn send_files(
         .map_err(|e| e.to_string())
 }
 
+/// Send a directory to a peer (preserving structure)
+#[tauri::command]
+pub async fn send_directory(
+    state: State<'_, AppState>,
+    address: String,
+    port: u16,
+    directory_path: String,
+) -> Result<(), String> {
+    let path = PathBuf::from(directory_path);
+
+    let engine = state.engine.lock().await;
+    engine
+        .send_directory(&address, port, path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Accept a pending transfer
 #[tauri::command]
 pub async fn accept_transfer(
@@ -166,6 +183,53 @@ pub async fn reject_transfer(
         .reject_transfer(&transfer_id)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Cancel an in-progress transfer
+#[tauri::command]
+pub async fn cancel_transfer(
+    state: State<'_, AppState>,
+    transfer_id: String,
+) -> Result<(), String> {
+    let engine = state.engine.lock().await;
+    engine
+        .cancel_transfer(&transfer_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Accept all pending transfers
+#[tauri::command]
+pub async fn accept_all_transfers(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let engine = state.engine.lock().await;
+    let results = engine.accept_all_transfers().await;
+
+    // Collect successful transfer IDs
+    let accepted: Vec<String> = results
+        .into_iter()
+        .filter_map(|(id, result)| result.ok().map(|_| id))
+        .collect();
+
+    Ok(accepted)
+}
+
+/// Reject all pending transfers
+#[tauri::command]
+pub async fn reject_all_transfers(state: State<'_, AppState>) -> Result<(), String> {
+    let engine = state.engine.lock().await;
+    let results = engine.reject_all_transfers().await;
+
+    // Check if any rejections failed
+    let errors: Vec<_> = results
+        .into_iter()
+        .filter_map(|(id, result)| result.err().map(|e| format!("{}: {}", id, e)))
+        .collect();
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("Some rejections failed: {}", errors.join(", ")))
+    }
 }
 
 /// Get all pending transfers
@@ -202,16 +266,13 @@ pub async fn get_pending_transfers(
 pub async fn get_transfer_history(
     state: State<'_, AppState>,
 ) -> Result<Vec<TransferRecord>, String> {
-    let history = state.transfer_history.read().await;
-    Ok(history.clone())
+    Ok(state.history_store.list())
 }
 
 /// Clear transfer history
 #[tauri::command]
 pub async fn clear_transfer_history(state: State<'_, AppState>) -> Result<(), String> {
-    let mut history = state.transfer_history.write().await;
-    history.clear();
-    Ok(())
+    state.history_store.clear().map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -232,6 +293,13 @@ pub async fn update_settings(
     app: AppHandle,
     new_settings: AppSettings,
 ) -> Result<(), String> {
+    // Check if port changed
+    let old_port = {
+        let settings = state.settings.read().await;
+        settings.port
+    };
+    let port_changed = old_port != new_settings.port;
+
     // Persist settings to disk
     state
         .settings_store
@@ -253,6 +321,25 @@ pub async fn update_settings(
 
     let mut engine = state.engine.lock().await;
     engine.update_config(engine_config).await;
+
+    // If port changed, attempt to rebind the server
+    if port_changed {
+        if let Err(e) = engine.change_port(new_settings.port).await {
+            tracing::warn!("Failed to change port to {}: {}", new_settings.port, e);
+            // Revert port setting on failure
+            drop(engine);
+            let mut settings = state.settings.write().await;
+            settings.port = old_port;
+            let reverted_settings = settings.clone();
+            drop(settings);
+            state
+                .settings_store
+                .update(reverted_settings.clone())
+                .map_err(|e| e.to_string())?;
+            let _ = app.emit("settings-updated", reverted_settings);
+            return Err(format!("Failed to change port: {}. Reverted to {}", e, old_port));
+        }
+    }
     drop(engine);
 
     let _ = app.emit("settings-updated", new_settings);

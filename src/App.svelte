@@ -84,7 +84,13 @@ Single-window UI with permanent sidebar and card-based main content.
       const existing = activeTransfers.find(t => t.id === progress.transferId);
       if (existing) {
         activeTransfers = activeTransfers.map(t =>
-          t.id === progress.transferId ? { ...t, ...progress } : t
+          t.id === progress.transferId ? {
+            ...t,
+            bytesTransferred: progress.bytesTransferred,
+            totalBytes: progress.totalBytes,
+            currentFile: progress.currentFile,
+            speedBps: progress.speedBps
+          } : t
         );
       }
     });
@@ -183,6 +189,45 @@ Single-window UI with permanent sidebar and card-based main content.
     }
   }
 
+  async function acceptAllPendingTransfers() {
+    try {
+      await invoke("accept_all_transfers");
+      // Move all pending to active
+      for (const transfer of pendingTransfers) {
+        activeTransfers = [...activeTransfers, {
+          ...transfer,
+          bytesTransferred: 0,
+          totalBytes: transfer.totalSize
+        }];
+      }
+      pendingTransfers = [];
+    } catch (e) {
+      console.error("Failed to accept all transfers:", e);
+    }
+  }
+
+  async function rejectAllPendingTransfers() {
+    try {
+      await invoke("reject_all_transfers");
+      pendingTransfers = [];
+    } catch (e) {
+      console.error("Failed to reject all transfers:", e);
+    }
+  }
+
+  async function cancelTransfer(transferId) {
+    try {
+      await invoke("cancel_transfer", { transferId });
+      activeTransfers = activeTransfers.filter(t => t.id !== transferId);
+      recentResults = [...recentResults, { id: transferId, status: 'failed', error: 'Transfer cancelled' }];
+      setTimeout(() => {
+        recentResults = recentResults.filter(r => r.id !== transferId);
+      }, 5000);
+    } catch (e) {
+      console.error("Failed to cancel transfer:", e);
+    }
+  }
+
   $effect(() => {
     if (receiveOnly && currentView === "send") {
       currentView = "receive";
@@ -266,6 +311,9 @@ Single-window UI with permanent sidebar and card-based main content.
         {recentResults}
         onAccept={acceptPendingTransfer}
         onReject={rejectPendingTransfer}
+        onAcceptAll={acceptAllPendingTransfers}
+        onRejectAll={rejectAllPendingTransfers}
+        onCancel={cancelTransfer}
         onDismissResult={dismissResult}
       />
     {:else if currentView === "transfers"}

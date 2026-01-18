@@ -18,6 +18,9 @@ Includes:
     recentResults = [],
     onAccept = () => {},
     onReject = () => {},
+    onAcceptAll = () => {},
+    onRejectAll = () => {},
+    onCancel = () => {},
     onDismissResult = () => {}
   } = $props();
 
@@ -137,7 +140,18 @@ Includes:
         <div class="card-body">
           <div class="active-transfer-header">
             <span class="transfer-label">Receiving files...</span>
-            <span class="transfer-size-info">{formatSize(transfer.bytesTransferred || 0)} / {formatSize(transfer.totalBytes || transfer.totalSize || 0)}</span>
+            <div class="transfer-header-right">
+              <span class="transfer-size-info">{formatSize(transfer.bytesTransferred || 0)} / {formatSize(transfer.totalBytes || transfer.totalSize || 0)}</span>
+              <button
+                class="btn btn-ghost btn-sm cancel-btn"
+                onclick={() => onCancel(transfer.transferId || transfer.id)}
+                title="Cancel transfer"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
           </div>
           {#if transfer.currentFile}
             <div class="current-file">{transfer.currentFile}</div>
@@ -157,7 +171,25 @@ Includes:
 <!-- Pending Transfers -->
 {#if pendingTransfers.length > 0}
   <div class="pending-section">
-    <h3 class="section-title">Incoming Transfers</h3>
+    <div class="section-header">
+      <h3 class="section-title">Incoming Transfers</h3>
+      {#if pendingTransfers.length > 1}
+        <div class="batch-actions">
+          <button class="btn btn-primary btn-sm" onclick={onAcceptAll}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            Accept All
+          </button>
+          <button class="btn btn-destructive btn-sm" onclick={onRejectAll}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            Reject All
+          </button>
+        </div>
+      {/if}
+    </div>
     {#each pendingTransfers as transfer}
       <div class="card pending-transfer-card">
         <div class="card-body">
@@ -314,11 +346,23 @@ Includes:
     margin-top: var(--space-4);
   }
 
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-3);
+  }
+
   .section-title {
     font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: var(--space-3);
+    margin-bottom: 0;
+  }
+
+  .batch-actions {
+    display: flex;
+    gap: var(--space-2);
   }
 
   .pending-transfer-card {
@@ -415,6 +459,12 @@ Includes:
     align-items: center;
   }
 
+  .transfer-header-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
   .transfer-label {
     font-weight: 500;
     color: var(--text-primary);
@@ -423,6 +473,14 @@ Includes:
   .transfer-size-info {
     font-size: var(--font-size-sm);
     color: var(--text-muted);
+  }
+
+  .cancel-btn {
+    color: var(--status-error);
+  }
+
+  .cancel-btn:hover {
+    background: rgba(248, 81, 73, 0.1);
   }
 
   .current-file {
